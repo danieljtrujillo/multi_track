@@ -1,0 +1,1389 @@
+/**
+	@file
+	multi_track
+	
+	multi_track is a MAX/MSP extension, the object that can load and run pytorvh neural network through running the Python server. 
+	The the python server will be acquisitively fast and will use the GPU if available. 
+	For the object to function, you need Python and Tensorflow installed on your machine. Ecxact list of nessesary librieries will be provided
+	with the object in README file. multi_track takes the network's name, input matrix sizes and input data as arguments. 
+	The object can load a neural network with message "read" saved in HDF5 format. The message with the message "data" followed by a list 
+	of numbers and ending with mnessage "end" will trigger the prediction process. In response, the object will output a list of numbers 
+	with indexies of the corresponding size as a prediction from the network. When deleted from the patch, the object must deactivate 
+	the python server and free all the memory taken.
+
+	Tornike Karchkhadze, tkarchkhadze@ucsd.edu
+*/
+
+
+
+
+#include "ext.h"
+#include "ext_obex.h"
+#include "jit.common.h"
+
+#include <time.h>
+
+
+#include "shellapi.h"
+#include <windows.h>
+#include <algorithm>
+
+
+#include <iostream>
+#include "osc/OscOutboundPacketStream.h"
+#include "ip/UdpSocket.h"
+#include <ip/IpEndpointName.h>
+#include "osc/OscReceivedElements.h"
+#include "osc/OscPacketListener.h"
+
+#include <mutex>
+
+
+#include<stdio.h>		/* for dumpping memroy to file */
+
+#include "z_dsp.h"			// required for MSP objects
+
+#include <thread>
+#include <chrono> // For optional delays
+
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")  // Link Winsock library
+
+#include <tlhelp32.h>
+
+
+
+//using namespace std::placeholders;
+
+
+//#define ADDRESS "reach2.ircam.fr" //"129.102.15.13" /* local host ip */
+#define OUTPUT_BUFFER_SIZE 65536 /* maximum buffer size for osc send */
+#define MAX_OSC_PACKET_SIZE 65535  // Maximum UDP packet size allowed
+//#define NUM_SAMPLES 163840
+
+/* This following class is for controling threading and data flow to and from the python server */
+/* we have this class because this is much more convinient to call its instances and call its functions this way */
+
+class thread_control
+{
+	std::mutex mutex;
+	std::condition_variable condVar;
+
+public:
+	thread_control()
+	{}
+	void notify() /* this will be used to notify threads that server have done processing */
+	{
+		condVar.notify_one();
+	}
+	void waitforit() /* this will be used to stop threads and wait for responces from server */
+	{
+		std::unique_lock<std::mutex> mlock(mutex);
+		condVar.wait(mlock);
+	}
+	void lock() {
+		mutex.lock();
+	}
+	void unlock() {
+		mutex.unlock();
+	}
+};
+
+
+
+// Data Structures
+typedef struct _multi_track {
+	t_object	ob;
+
+	double percentage;           // To store the percentage value
+	//int calculated_samples;      // To store the result of 163840 * percentage
+	double pr_win_mul;
+
+
+	int* bass_index;        // Index for bass buffer
+	int* drums_index;       // Index for drums buffer
+	int* guitar_index;      // Index for guitar buffer
+	int* piano_index;       // Index for piano buffer
+
+
+	//char filename[MAX_PATH_CHARS]; /* Keras Network name saved as .h5 file */
+
+	int verbose_flag; /* defines if extention will or won't output execution times and other information */
+
+	SHELLEXECUTEINFO lpExecInfo; /* Open .h5 file handler */
+
+	/* paralel thereads for osc listening and outputing */
+	t_systhread		listener_thread;
+
+	/* comunication ports with pythin server */
+	int PORT_SENDER; 
+	int PORT_LISTENER; 
+
+	//bool* server_predicted;		/* flag if server has predicted */
+	//bool* server_ready;			/* flag if server is running and ready to receive data */
+	//bool* python_import_done;	/* flag if server iported chunk of data and is ready to receive next chunk */
+
+	/* thread controls */
+	thread_control* out_tread_control;		/* lock, unlock and notify routine for output thread */
+	thread_control* server_control;			/* lock, unlock and notify routine for server start up thread */
+	thread_control* python_import_control;	/* lock, unlock and notify routine for server's data importing thread */
+	
+	/* outlets */
+	void* bass_outlet;     // Outlet for bass buffer
+	void* drums_outlet;    // Outlet for drums buffer
+	void* guitar_outlet;   // Outlet for guitar buffer
+	void* piano_outlet;    // Outlet for piano buffer
+
+	int package_size;  // Variable to store the current packet size
+	HANDLE server_process = NULL; // Store the server process handle
+	HANDLE server_job;  // Add this field
+	char command_str[1024]; // Add this field to store the command
+
+	char client_ip[512] = { 0 };
+	char server_ip[512] = { 0 };
+
+	int predict_flags[4];  // 1 = predict (send), 0 = skip
+
+} t_multi_track;
+
+
+// Prototypes
+t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv);
+
+void		multi_track_assist(t_multi_track* x, void* b, long m, long a, char* s);
+void		multi_track_free(t_multi_track* x);
+
+void		multi_track_load_model(t_multi_track* x);
+void		multi_track_server(t_multi_track* x, long command);
+void		multi_track_verbose(t_multi_track* x, long command);
+void		multi_track_set_percentage(t_multi_track* x, double percentage);
+void		multi_track_set_pr_win_mul(t_multi_track* x, double pr_win_mul);
+
+
+void		multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);  // to read and send matrix directly
+
+void		multi_track_OSC_time_to_predict_sender(t_multi_track* x);
+void		multi_track_OSC_load_model(t_multi_track* x);
+void		send_acknowledgment(t_multi_track* x);
+
+// data sending
+void		send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size);
+
+void		* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]);
+void		multi_track_OSC_listen_thread(t_multi_track* x);
+
+void		multi_track_set_packet_size(t_multi_track* x, long new_size);
+void		multi_track_test_packet(t_multi_track* x);
+
+void		multi_track_send_print(t_multi_track* x);
+void		multi_track_send_reset(t_multi_track* x);
+
+void		multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
+
+void		get_public_ip(char* ip_buffer, size_t buffer_size);
+void		multi_track_get_client_ip(t_multi_track* x);
+
+void		multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
+void		multi_track_send_predict_instruments(t_multi_track* x);
+
+void		timestamp();
+
+
+
+
+
+
+// Globals and Statics
+static t_class* s_multi_track_class = NULL;
+
+///**********************************************************************/
+
+// Class Definition and Life Cycle
+
+void ext_main(void* r)
+{
+	t_class* c;
+
+	//c = class_new("multi_track", (method)multi_track_new, (method)dsp_free, sizeof(t_multi_track), (method)NULL, A_GIMME, 0L);
+	c = class_new("multi_track", (method)multi_track_new, (method)multi_track_free, sizeof(t_multi_track), (method)NULL, A_GIMME, 0L);
+
+
+	// Add message handler for 'jit_matrix'
+	class_addmethod(c, (method)multi_track_jit_matrix, "jit_matrix", A_GIMME, 0);
+	
+
+	class_addmethod(c, (method)multi_track_assist, "assist", A_CANT, 0);
+
+	class_addmethod(c, (method)multi_track_load_model, "load_model", 0);
+
+	class_addmethod(c, (method)multi_track_server, "server", A_LONG, 0);
+	class_addmethod(c, (method)multi_track_verbose, "verbose", A_LONG, 0);
+
+	class_addmethod(c, (method)multi_track_set_percentage, "percentage", A_FLOAT, 0);
+	class_addmethod(c, (method)multi_track_set_pr_win_mul, "pr_win_mul", A_FLOAT, 0);
+
+
+	class_addmethod(c, (method)multi_track_set_packet_size, "packet_size", A_LONG, 0);
+	class_addmethod(c, (method)multi_track_test_packet, "test_packet", 0);
+	class_addmethod(c, (method)multi_track_send_print, "print", 0);
+	class_addmethod(c, (method)multi_track_send_reset, "reset", 0);
+
+	class_addmethod(c, (method)multi_track_set_command, "set_command", A_GIMME, 0);
+	class_addmethod(c, (method)multi_track_get_client_ip, "get_client_ip", 0);
+
+	class_addmethod(c, (method)multi_track_OSC_time_to_predict_sender, "predict", 0); // to manually precit
+
+	class_addmethod(c, (method)multi_track_set_predict_instruments, "predict_instruments", A_GIMME, 0);
+
+	/* attributes */
+	CLASS_ATTR_LONG(c, "verb", 0, t_multi_track, verbose_flag);
+
+	class_dspinit(c);
+	class_register(CLASS_BOX, c);
+	s_multi_track_class = c;
+}
+
+
+/***********************************************************************/
+/***********************************************************************/
+/********************** Initialisation *********************************/
+/***********************************************************************/
+/***********************************************************************/
+
+t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
+{
+	t_multi_track* x = (t_multi_track*)object_alloc(s_multi_track_class);
+
+	if (x) {
+
+		x->percentage = 0.0;          // Initialize percentage
+		//x->calculated_samples = 0;    // Initialize calculated samples
+		x->pr_win_mul = 0.0;
+
+		//inlet_new(x, NULL);
+
+		/* initialising variables */
+
+		/* generate 2 random number that will beconme port numbers */
+		srand(time(NULL));		 
+		x->PORT_SENDER = 7000; //rand() % 100000;	
+		x->PORT_LISTENER = 8000; //rand() % 100000;
+
+		//memset(x->filename, 0, MAX_PATH_CHARS); /* emptying network name variable for the begining */
+
+		x->verbose_flag = 0;
+
+		x->bass_index = new int(0);        // Initialize bass index to 0
+		x->drums_index = new int(0);       // Initialize drums index to 0
+		x->guitar_index = new int(0);      // Initialize guitar index to 0
+		x->piano_index = new int(0);       // Initialize piano index to 0
+					
+		//x->lpExecInfo = NULL;			/* no need to be initialised */
+		
+		x->out_tread_control = new thread_control;
+		x->server_control = new thread_control;
+		x->python_import_control = new thread_control;
+	
+		/* here we check if argument are given */
+		long offset = attr_args_offset((short)argc, argv); /* this is number of arguments before attributes start with @-sign */
+
+		// Create outlets for left and right channels
+		x->piano_outlet = listout((t_object*)x);  // Rightmost outlet
+		x->guitar_outlet = listout((t_object*)x);
+		x->drums_outlet = listout((t_object*)x);
+		x->bass_outlet = listout((t_object*)x);  // Leftmost outlet
+
+
+		attr_args_process(x, argc, argv); /* this is attribute reader */
+
+		/* Starting up OSC listener server and output thread */
+		multi_track_OSC_listen_thread(x);   /* this function starts OSC listener inside sub-thread */
+
+		x->package_size = 10240;  // Default packet size
+
+		get_public_ip(x->client_ip, sizeof(x->client_ip));
+		strncpy(x->client_ip, x->client_ip, sizeof(x->client_ip) - 1);
+		post("Public IP: %s", x->client_ip);
+
+		for (int i = 0; i < 4; i++) {
+			x->predict_flags[i] = 0;  // Default: predict non of the instruments
+		}
+
+		
+	}
+	return x;
+
+}
+
+
+void multi_track_free(t_multi_track* x) {
+	post("Freeing multi_track object and stopping processes...");
+
+	/************** Stop Python server if running ****************/
+	if (x->server_process) {
+		DWORD exit_code;
+		if (GetExitCodeProcess(x->server_process, &exit_code) && exit_code == STILL_ACTIVE) {
+			post("Stopping Python server...");
+
+			// Terminate the entire process tree if managed by a job object
+			if (x->server_job) {
+				TerminateJobObject(x->server_job, 0);
+				CloseHandle(x->server_job);
+				x->server_job = NULL;
+			}
+
+			// Terminate the server process
+			TerminateProcess(x->server_process, 0);
+			CloseHandle(x->server_process);
+			x->server_process = NULL;
+
+			post("Python server stopped.");
+		}
+	}
+
+	///************** Stop listener thread safely ****************/
+	//if (x->listener_thread) {
+	//	post("Waiting for listener thread to exit...");
+	//	systhread_join(x->listener_thread, 0); // Wait for thread to finish
+	//	//systhread_exit(x->listener_thread, 0);
+	//	systhread_sleep(500);
+	//	x->listener_thread = NULL;
+	//	post("Listener thread stopped.");
+	//}
+
+	/************** Free allocated memory ****************/
+	delete x->bass_index;
+	delete x->drums_index;
+	delete x->guitar_index;
+	delete x->piano_index;
+
+	delete x->out_tread_control;
+	delete x->server_control;
+	delete x->python_import_control;
+
+	post("Memory freed. Object cleanup complete.");
+
+}
+
+
+
+
+
+/****** getting and sending data from matrix ********/
+
+void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
+	post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>data import started"); timestamp();
+
+	if (argc < 1 || atom_gettype(argv) != A_SYM) {
+		object_error((t_object*)x, "Invalid input. Expected a matrix name.");
+		return;
+	}
+
+	// Extract matrix name
+	t_symbol* matrix_name = atom_getsym(argv);
+	t_object* matrix = (t_object*)jit_object_findregistered(matrix_name);
+
+	if (!matrix) {
+		object_error((t_object*)x, "Matrix not found: %s", matrix_name->s_name);
+		return;
+	}
+
+	// Lock the matrix for safe access
+	long lock = (long)jit_object_method(matrix, gensym("lock"), 1);
+
+	// Get matrix info
+	t_jit_matrix_info info;
+	jit_object_method(matrix, gensym("getinfo"), &info);
+
+	// Ensure the matrix has 4 planes and is float32
+	if (info.type != _jit_sym_float32 || info.planecount != 4) {
+		object_error((t_object*)x, "Matrix must have 4 planes of type float32.");
+		jit_object_method(matrix, gensym("lock"), lock);
+		return;
+	}
+
+	// Print matrix dimensions for debugging
+	post("Matrix dimensions: %ld x %ld (4 planes)", info.dim[0], info.dim[1]);
+
+	// Access matrix data
+	char* matrix_data;
+	jit_object_method(matrix, gensym("getdata"), &matrix_data);
+
+	if (!matrix_data) {
+		object_error((t_object*)x, "Failed to access matrix data.");
+		jit_object_method(matrix, gensym("lock"), lock);
+		return;
+	}
+
+	// Plane tags for OSC messages
+	const char* plane_tags[4] = { "/bass", "/drums", "/guitar", "/piano" };
+
+	//// Send each plane concurrently
+	//std::thread bass_thread(send_matrix_plane, matrix_data, 0, info.dim[0], info.dim[1], info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER, plane_tags[0], x->package_size);
+	//std::thread drums_thread(send_matrix_plane, matrix_data, 1, info.dim[0], info.dim[1], info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER, plane_tags[1], x->package_size);
+	//std::thread guitar_thread(send_matrix_plane, matrix_data, 2, info.dim[0], info.dim[1], info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER, plane_tags[2], x->package_size);
+	//std::thread piano_thread(send_matrix_plane, matrix_data, 3, info.dim[0], info.dim[1], info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER, plane_tags[3], x->package_size);
+
+	//bass_thread.join();
+	//drums_thread.join();
+	//guitar_thread.join();
+	//piano_thread.join();
+
+	// Create threads for sending only non-predicted instruments
+	std::thread* threads[4] = { nullptr };
+
+	for (int i = 0; i < 4; i++) {
+		if (x->predict_flags[i] == 0) {  // Send only if NOT predicted
+			threads[i] = new std::thread(send_matrix_plane, matrix_data, i, info.dim[0], info.dim[1],
+				info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER,
+				plane_tags[i], x->package_size);
+		}
+		//else {
+		//	post("Skipping %s (predicted by model)", plane_tags[i]);
+		//}
+	}
+
+	// Join threads
+	for (int i = 0; i < 4; i++) {
+		if (threads[i]) {
+			threads[i]->join();
+			delete threads[i];
+		}
+	}
+
+	// Unlock the matrix
+	jit_object_method(matrix, gensym("lock"), lock);
+
+	post("All planes sent successfully.");
+	post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>data import ended"); timestamp();
+
+	// Send triger to start prediction process
+	multi_track_OSC_time_to_predict_sender(x);
+}
+
+
+
+
+
+/**********************************************************************/
+/**********************************************************************/
+/*************************** Methods ********************************/
+/**********************************************************************/
+/**********************************************************************/
+
+void multi_track_set_packet_size(t_multi_track* x, long new_size) {
+	if (new_size < 128 || new_size > 16384) {  // Limit range for safety
+		post("Invalid packet size. Choose between 128 and 16384 bytes.");
+		return;
+	}
+
+	x->package_size = new_size;
+	post("Packet size set to %d", x->package_size);
+
+	// Send updated package size (chunk size) to Python
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+
+	char buffer[256];
+	osc::OutboundPacketStream p(buffer, 256);
+
+	p << osc::BeginMessage("/update_package_size")
+		<< x->package_size  // Send the new package size to Python
+		<< osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+	post("Sent OSC message: /update_package_size with size %d", x->package_size);
+}
+
+void multi_track_set_percentage(t_multi_track* x, double new_percentage) {
+	if (new_percentage < 0.0 || new_percentage > 1.0) {  // Limit between 0 and 1
+		post("Invalid percentage. Choose a value between 0.0 and 1.0.");
+		return;
+	}
+
+	x->percentage = new_percentage;
+	post("Percentage set to %f", x->percentage);
+
+	// Send updated percentage to Python server
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+
+	char buffer[256];
+	osc::OutboundPacketStream p(buffer, 256);
+
+	p << osc::BeginMessage("/update_percentage")
+		<< x->percentage  // Send the new percentage to Python
+		<< osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+	post("Sent OSC message: /update_percentage with value %f", x->percentage);
+}
+
+
+void multi_track_set_pr_win_mul(t_multi_track* x, double new_pr_win_mul) {
+	if (new_pr_win_mul < 0.0 || new_pr_win_mul > 2.0) {  // Limit between 0 and 2
+		post("Invalid percentage. Choose a value between 0.0 and 2.0.");
+		return;
+	}
+
+	x->pr_win_mul = new_pr_win_mul;
+	post("Percentage set to %f", x->pr_win_mul);
+
+	// Send updated percentage to Python server
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+
+	char buffer[256];
+	osc::OutboundPacketStream p(buffer, 256);
+
+	p << osc::BeginMessage("/pr_win_mul")
+		<< x->pr_win_mul  // Send the new percentage to Python
+		<< osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+	post("Sent OSC message: /pr_win_mul with value %f", x->pr_win_mul);
+}
+
+
+void multi_track_test_packet(t_multi_track* x) {
+	post("Starting packet test with size %d", x->package_size);
+
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+	char osc_buffer[OUTPUT_BUFFER_SIZE];
+
+	osc::OutboundPacketStream p(osc_buffer, OUTPUT_BUFFER_SIZE);
+	p.Clear();
+	p << osc::BeginMessage("/packet_test") << x->package_size;
+
+	// Generate random float data
+	for (int i = 0; i < x->package_size; i++) {
+		float rand_value = static_cast<float>(rand()) / RAND_MAX;
+		p << rand_value;
+	}
+
+	p << osc::EndMessage;
+	transmitSocket.Send(p.Data(), p.Size());
+}
+
+
+void multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
+	if (argc != 4) {
+		post("Error: predict_instruments requires exactly 4 arguments (bass, drums, guitar, piano), received %ld", argc);
+		return;
+	}
+
+	for (int i = 0; i < 4; i++) {
+		if (atom_gettype(&argv[i]) == A_LONG) {
+			int value = atom_getlong(&argv[i]);
+			if (value == 1 || value == 0 || value == -1) {
+				x->predict_flags[i] = value;
+			}
+			else {
+				post("Error: Argument %d must be 1 (predict), 0 (send), or -1 (ignore), received %d", i, value);
+				return;
+			}
+		}
+		else {
+			post("Error: Argument %d is not an integer!", i);
+			return;
+		}
+	}
+
+	post("Prediction selection updated: bass=%d drums=%d guitar=%d piano=%d",
+		x->predict_flags[0], x->predict_flags[1], x->predict_flags[2], x->predict_flags[3]);
+
+	multi_track_send_predict_instruments(x);
+}
+
+
+void multi_track_send_predict_instruments(t_multi_track* x) {
+
+	// Send updated selection to Python server
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+	char buffer[256];
+	osc::OutboundPacketStream p(buffer, 256);
+
+	p << osc::BeginMessage("/predict_instruments")
+		<< x->predict_flags[0] << x->predict_flags[1]
+		<< x->predict_flags[2] << x->predict_flags[3]
+		<< osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+	post("Sent OSC message: /predict_instruments");
+}
+
+
+
+
+void multi_track_send_print(t_multi_track* x) {
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+
+	char buffer[256];
+	osc::OutboundPacketStream p(buffer, 256);
+
+	p << osc::BeginMessage("/print") << true << osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+	post("Sent OSC message: /print 1");
+}
+
+void multi_track_send_reset(t_multi_track* x) {
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+
+	char buffer[256];
+	osc::OutboundPacketStream p(buffer, 256);
+
+	p << osc::BeginMessage("/reset") << 1 << osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+	post("Sent OSC message: /reset");
+
+	// Reset all instrument indices
+	x->bass_index = 0;
+	x->drums_index = 0;
+	x->guitar_index = 0;
+	x->piano_index = 0;
+	post("Reset indexes");
+}
+
+
+void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
+	if (argc < 1) {
+		post("Usage: set_command <command> [--server_ip <IP>]");
+		return;
+	}
+
+	// Get the command from Max
+	char* command = atom_getsym(argv)->s_name;
+
+	// Store the full command
+	strncpy(x->command_str, command, sizeof(x->command_str) - 1);
+	x->command_str[sizeof(x->command_str) - 1] = '\0';
+
+	// Default server IP (assumes server is local)
+	strncpy(x->server_ip, "127.0.0.1", sizeof(x->server_ip) - 1);
+	x->server_ip[sizeof(x->server_ip) - 1] = '\0';
+
+	// Find "--server_ip" in the command
+	char* server_ip_flag = strstr(command, "--server_ip");
+	if (server_ip_flag) {
+		// Move past "--server_ip"
+		server_ip_flag += strlen("--server_ip");
+
+		// Skip spaces
+		while (*server_ip_flag == ' ') server_ip_flag++;
+
+		// Extract only the IP (stop at space or end of string)
+		char* end = server_ip_flag;
+		while (*end && *end != ' ') end++; // Stop at first space
+
+		// Copy the extracted IP
+		size_t ip_length = end - server_ip_flag;
+		if (ip_length < sizeof(x->server_ip)) {
+			strncpy(x->server_ip, server_ip_flag, ip_length);
+			x->server_ip[ip_length] = '\0'; // Null-terminate
+		}
+	}
+
+	post("Command set to: %s", x->command_str);
+	post("Server IP set to: %s", x->server_ip);
+}
+
+
+
+void get_public_ip(char* ip_buffer, size_t buffer_size) {
+	WSADATA wsaData;
+	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+		post("WSAStartup failed.");
+		return;
+	}
+
+	// Create a dummy socket to determine public IP
+	SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
+	if (sock == INVALID_SOCKET) {
+		post("Failed to create socket.");
+		WSACleanup();
+		return;
+	}
+
+	// Connect to a public DNS server (Google's 8.8.8.8)
+	struct sockaddr_in server_addr;
+	memset(&server_addr, 0, sizeof(server_addr));
+	server_addr.sin_family = AF_INET;
+	server_addr.sin_port = htons(80);
+	inet_pton(AF_INET, "8.8.8.8", &server_addr.sin_addr);
+
+	if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
+		post("Failed to connect socket.");
+		closesocket(sock);
+		WSACleanup();
+		return;
+	}
+
+	// Get the local socket's IP address
+	struct sockaddr_in local_addr;
+	int addr_len = sizeof(local_addr);
+	getsockname(sock, (struct sockaddr*)&local_addr, &addr_len);
+
+	// Convert IP to string
+	inet_ntop(AF_INET, &local_addr.sin_addr, ip_buffer, buffer_size);
+
+	closesocket(sock);
+	WSACleanup();
+}
+
+void multi_track_get_client_ip(t_multi_track* x) {
+	get_public_ip(x->client_ip, sizeof(x->client_ip));
+	post("Client public IP: %s", x->client_ip);
+}
+
+
+
+
+/* this function shows info when user brings mouse to inlets and outlets */
+void  multi_track_assist(t_multi_track* x, void* b, long m, long a, char* s)
+{
+	if (m == ASSIST_INLET) { // inlet
+		sprintf(s, "Mono sigal");
+	}
+	else {	// outlet
+		switch (a) {
+		case 0: sprintf(s, "Output Left"); break;
+		case 1: sprintf(s, "Output Right"); break;
+		}
+	}
+}
+
+/* function that sets verbose flag. when werbose is 1 server outputs log data */
+void multi_track_verbose(t_multi_track* x, long command) {
+
+	x->verbose_flag = command;
+
+	if (command == 1) {
+
+		//post("Network file: %s", x->filename);
+		post("Listening on port: %d", x->PORT_LISTENER);
+		post("Sending to port: %d", x->PORT_SENDER);
+		//post("Server running: %d", *x->server_ready);
+	}
+	else if (command == 0) {}
+
+}
+
+
+
+///********************** load network *******************/
+void multi_track_load_model(t_multi_track* x) {
+	post("Loading model...");
+
+	// Call the existing function to send the package size, percentage and load model
+	multi_track_set_packet_size(x, x->package_size);
+	multi_track_set_percentage(x, x->percentage);
+	multi_track_set_pr_win_mul(x, x->pr_win_mul);
+	multi_track_send_predict_instruments(x);
+	multi_track_OSC_load_model(x);
+
+	post("Model load request sent.");
+}
+
+
+/****************************************************/
+/******************* Python Server ******************/
+/****************************************************/
+
+
+// Function to terminate a process and its children
+void terminate_process_tree(DWORD process_id) {
+	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+	if (hSnapshot == INVALID_HANDLE_VALUE) {
+		post("Failed to create process snapshot.");
+		return;
+	}
+
+	PROCESSENTRY32 pe;
+	pe.dwSize = sizeof(PROCESSENTRY32);
+
+	if (Process32First(hSnapshot, &pe)) {
+		do {
+			if (pe.th32ParentProcessID == process_id) {
+				// Recursively terminate child processes
+				terminate_process_tree(pe.th32ProcessID);
+			}
+		} while (Process32Next(hSnapshot, &pe));
+	}
+
+	// Terminate the main process
+	HANDLE hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, process_id);
+	if (hProcess != NULL) {
+		TerminateProcess(hProcess, 0);
+		CloseHandle(hProcess);
+	}
+
+	CloseHandle(hSnapshot);
+}
+
+
+void multi_track_server(t_multi_track* x, long command) {
+	if (command == 1) { // Start the server
+		if (x->server_process != NULL) {
+			DWORD exit_code;
+			if (GetExitCodeProcess(x->server_process, &exit_code) && exit_code == STILL_ACTIVE) {
+				post("Server is already running.");
+				return;
+			}
+		}
+
+		// Check if x->command_str is set
+		if (x->command_str[0] == '\0') {
+			post("Error: No command defined. Use 'set_command' to define the server command.");
+			return;
+		}
+
+		// Use the stored command
+		char command_str[512];
+		snprintf(command_str, sizeof(command_str), "cmd.exe /C %s", x->command_str);
+
+		STARTUPINFO si;
+		PROCESS_INFORMATION pi;
+		ZeroMemory(&si, sizeof(si));
+		si.cb = sizeof(si);
+		ZeroMemory(&pi, sizeof(pi));
+
+		// Show the terminal window
+		si.dwFlags = STARTF_USESHOWWINDOW;
+		si.wShowWindow = SW_SHOWNORMAL;  // Show the terminal window
+
+		// Create a job object to manage the process tree
+		HANDLE hJob = CreateJobObject(NULL, NULL);
+		if (hJob == NULL) {
+			post("Failed to create job object.");
+			return;
+		}
+
+		// Start the process with a visible terminal
+		if (!CreateProcess(NULL, command_str, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
+			post("Failed to start the server.");
+			CloseHandle(hJob);
+			return;
+		}
+
+		// Assign the process to the job object
+		if (!AssignProcessToJobObject(hJob, pi.hProcess)) {
+			post("Failed to assign process to job object.");
+			CloseHandle(hJob);
+			TerminateProcess(pi.hProcess, 0);
+			CloseHandle(pi.hProcess);
+			CloseHandle(pi.hThread);
+			return;
+		}
+
+		// Store process and job handles
+		x->server_process = pi.hProcess;
+		x->server_job = hJob;
+		CloseHandle(pi.hThread);
+
+		post("Server started.");
+		//*x->server_ready = false;
+		//x->server_control->waitforit();
+
+		//if (x->filename[0] != 0) {
+		//	multi_track_OSC_load_model(x, x->filename);
+		//	//*x->server_ready = false;
+		//	//x->server_control->waitforit();
+		//}
+		//
+	}
+	else if (command == 0) { // Stop the server
+		if (x->server_process) {
+			DWORD exit_code;
+			if (GetExitCodeProcess(x->server_process, &exit_code)) {
+				if (exit_code == STILL_ACTIVE) {
+					post("Stopping the server...");
+
+					// Terminate the entire process tree using the job object
+					if (x->server_job != NULL) {
+						if (!TerminateJobObject(x->server_job, 0)) {
+							post("Failed to terminate job object.");
+						}
+						CloseHandle(x->server_job);
+						x->server_job = NULL;
+					}
+
+					// Close the process handle
+					CloseHandle(x->server_process);
+					x->server_process = NULL;
+					//*x->server_ready = false;
+					post("Server stopped.");
+				}
+				else {
+					post("Server was already stopped.");
+					x->server_process = NULL;
+				}
+			}
+			else {
+				post("Failed to get exit code of the server process.");
+			}
+		}
+		else {
+			post("No active server process found.");
+		}
+	}
+}
+
+
+/****************************************** Some help and debuging functions **************************/
+
+/* expoerting memoruy to text file for testing */
+
+void timestamp()     /*********this is used to track timing of data flow *****/
+{
+
+	SYSTEMTIME t;
+	GetSystemTime(&t); // or GetLocalTime(&t)
+	post("%02d:%02d.%4d\n",
+		t.wMinute, t.wSecond, t.wMilliseconds);
+
+}
+/***********************************************************************************************/
+////ksjkdljaslkjdasdjaskdjalskdjalskjdlkasjd
+
+
+/**************************** OSC SERVER *****************************/
+
+
+
+/*********************************************************************/
+/*************************** Data Send *******************************/
+/*********************************************************************/
+
+/* function for data sending */
+
+void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size) {
+	UdpTransmitSocket transmitSocket(IpEndpointName(address, port));
+	char osc_buffer[OUTPUT_BUFFER_SIZE];
+
+	// Divide the plane into chunks
+	//int package_size = package_size; // 10240; // Maximum floats per OSC message
+	int num_samples = dim0 * dim1; // Total samples in the plane
+	int num_chunks = (num_samples + package_size - 1) / package_size; // Round up
+
+	for (int chunk = 0; chunk < num_chunks; chunk++) {
+		osc::OutboundPacketStream p(osc_buffer, OUTPUT_BUFFER_SIZE);
+		p.Clear();
+		p << osc::BeginMessage(tag);
+
+		int start_index = chunk * package_size;
+		p << start_index;
+		int end_index = (start_index + package_size < num_samples) ? start_index + package_size : num_samples;
+
+		for (int i = start_index; i < end_index; i++) {
+			int row = i / dim1;
+			int col = i % dim1;
+			int matrix_index = row * dimstride0 / sizeof(float) + col * dimstride1 / sizeof(float) + plane;
+
+			float value = ((float*)matrix_data)[matrix_index];
+			p << value;
+		}
+
+		p << osc::EndMessage;
+		transmitSocket.Send(p.Data(), p.Size());
+
+		// Optional: Add a small delay to avoid overwhelming the receiver
+		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	}
+}
+
+
+
+/* function to send network file name */
+void multi_track_OSC_load_model(t_multi_track* x)
+{
+
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+
+	char buffer[4096];
+
+	osc::OutboundPacketStream p(buffer, 4096);
+
+	p << osc::BeginMessage("/load_model") << osc::EndMessage;
+
+
+	transmitSocket.Send(p.Data(), p.Size());
+
+}
+
+/* send signal that server needs to predict now */
+void multi_track_OSC_time_to_predict_sender(t_multi_track* x)
+{
+	int one = 1;
+
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+	
+	char buffer[32];
+
+	osc::OutboundPacketStream p(buffer, 32);
+
+	p << osc::BeginMessage("/predict") << one << osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+
+}
+
+// Add a function to send acknowledgment
+void send_acknowledgment(t_multi_track* x) {
+	// Send the acknowledgment message to the Python server
+	int one = 1;
+
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+
+	char buffer[32];
+
+	osc::OutboundPacketStream p(buffer, 32);
+
+	p << osc::BeginMessage("/ack") << one << osc::EndMessage;
+
+	transmitSocket.Send(p.Data(), p.Size());
+}
+
+
+
+
+
+/************************************************************/
+/************************* Listening ************************/
+/************************************************************/
+
+
+class multi_track_packetListener : public osc::OscPacketListener {
+
+public:
+
+	/* these are thread controls that are defined here and will be pluged to look at thread controls from the object */
+	thread_control* out_tread_control;
+	thread_control* server_control;
+	thread_control* python_import_control;
+
+	/* allocating buffer for output data */
+	void* bass_outlet;
+	void* drums_outlet;
+	void* guitar_outlet;
+	void* piano_outlet;
+
+	int bass_index;        // Index for bass buffer
+	int drums_index;       // Index for drums buffer
+	int guitar_index;      // Index for guitar buffer
+	int piano_index;       // Index for piano buffer
+
+	//int* calculated_samples;
+
+	/* these are local variables that will be aslo read form object variables */
+	//bool server_predicted=false;
+	//bool server_ready = false;   ///////////////////////////////////////// this need to be fasle in the end verison
+	//bool python_import_done = false;
+
+	void ProcessBundle(const osc::ReceivedBundle& b,
+		const IpEndpointName& remoteEndpoint)
+	{
+		////ignore bundle time tag for now
+
+		(void)remoteEndpoint; // suppress unused parameter warning
+
+		for (osc::ReceivedBundle::const_iterator i = b.ElementsBegin();
+			i != b.ElementsEnd(); ++i) {
+			if (i->IsBundle())
+				ProcessBundle(osc::ReceivedBundle(*i), remoteEndpoint);
+			else
+				ProcessMessage(osc::ReceivedMessage(*i), remoteEndpoint);   //, NULL
+		}
+	}
+
+
+
+
+	virtual void ProcessMessage(const osc::ReceivedMessage& m, const IpEndpointName& remoteEndpoint)
+	{
+		(void)remoteEndpoint; // suppress unused parameter warning
+		
+		try {
+
+
+			// Print the address pattern of the incoming message
+			//post("Received OSC message: %s", m.AddressPattern());
+
+
+
+			///* here comes signal that sevrer did append part of the data and needs next part, while sending data to server */
+			//if (std::strcmp(m.AddressPattern(), "/appended") == 0) {
+			//	osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+
+			//	/**** Here we read osc message with local variable. this is read from the main stuct also by pointer ***/
+			//	python_import_control->lock();
+			//	args >> python_import_done >> osc::EndMessage;
+			//	python_import_control->unlock();
+
+			//	/***** notify data sending function that is waiting for this ****/
+			//	python_import_control->notify();
+			//}
+
+			///* Here comes signal that server is loaded and running */
+			//if (std::strcmp(m.AddressPattern(), "/ready") == 0) {
+			//	osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+
+			//	/**** Here we read osc message with local variable. this is read from the main stuct also by pointer ***/
+
+			//	server_control->lock();
+			//	args >> server_ready >> osc::EndMessage;
+			//	server_control->unlock();
+
+			//	/***** notify main thread server starting function that is waiting for this ****/
+			//	server_control->notify();
+			//}
+
+			/* Here comes signal that server is done sending predicted data */
+			if (std::strcmp(m.AddressPattern(), "/server_predicted") == 0) {
+				osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+
+				out_tread_control->lock();
+				bool server_predicted;
+				args >> server_predicted >> osc::EndMessage;
+				out_tread_control->unlock();
+
+				if (server_predicted) {
+					// Reset all instrument indices
+					bass_index = 0;
+					drums_index = 0;
+					guitar_index = 0;
+					piano_index = 0;
+
+					//post("Server finished prediction. Resetting instrument indices to 0.");
+					post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>receive ended"); timestamp();
+
+					// Notify waiting processes
+					out_tread_control->notify();
+				}
+			}
+
+			if (std::strcmp(m.AddressPattern(), "/packet_test_response") == 0) {
+				osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+				int received_size;
+				args >> received_size;
+
+				// Allocate a C-style array dynamically
+				float* received_values = new float[received_size];
+				int count = 0;
+				float value;
+
+				// Extract all float values received
+				while (!args.Eos() && count < received_size) {
+					args >> value;
+					received_values[count] = value;
+					count++;
+				}
+
+				// Print the results
+				post("Packet test completed. Received %d floats.", received_size);
+
+				// Verify if the number of values matches the expected size
+				if (count == received_size) {
+					post("Packet integrity verified. All values received.");
+				}
+				else {
+					post("WARNING: Expected %d values but received %d.", received_size, count);
+				}
+
+				// Free allocated memory
+				delete[] received_values;
+			}
+
+			/* here comes prediction data in chunks of 10240 */
+			// ##################################################################
+			// Handle data messages for "/bass", "/drums", "/guitar", "/piano"
+			void* target_outlet = nullptr;
+			int* current_index = nullptr;
+
+			if (std::strcmp(m.AddressPattern(), "/bass") == 0) {
+				target_outlet = bass_outlet;
+				current_index = &bass_index;
+			}
+			else if (std::strcmp(m.AddressPattern(), "/drums") == 0) {
+				target_outlet = drums_outlet;
+				current_index = &drums_index;
+			}
+			else if (std::strcmp(m.AddressPattern(), "/guitar") == 0) {
+				target_outlet = guitar_outlet;
+				current_index = &guitar_index;
+			}
+			else if (std::strcmp(m.AddressPattern(), "/piano") == 0) {
+				target_outlet = piano_outlet;
+				current_index = &piano_index;
+			}
+			else {
+				//post("Unknown address pattern: %s", m.AddressPattern());
+				return;
+			}
+
+			osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+
+			// Process the OSC message data
+			t_atom out_atom[2]; // Pair: index and value
+			float value;
+
+			while (!args.Eos()) {
+				args >> value;
+
+				//// Check if the current index exceeds the maximum limit
+				//if (*current_index + 1 >= *calculated_samples) {
+				//	post("Reached maximum samples for %s.", m.AddressPattern());
+				//	post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>receive ended"); timestamp();
+				//	*current_index = 0;
+				//	break;
+				//}
+
+				// Set the index and value to atoms
+				atom_setlong(&out_atom[0], *current_index + 1); // 1-based index
+				atom_setfloat(&out_atom[1], value);
+
+				// Output to the target outlet
+				outlet_list(target_outlet, 0L, 2, out_atom);
+				//outlet_anything(target_outlet, out_atom, 0, NIL);
+
+				// Increment the index
+				(*current_index)++;
+			}
+
+
+			// ##################################################################
+
+
+		}
+		catch (osc::Exception& e) {
+
+			post("error while parsing message from server!");
+
+		}
+	}
+
+};
+
+class CustomUdpListener {
+private:
+	SOCKET sock_fd;
+	char buffer[MAX_OSC_PACKET_SIZE];
+	osc::OscPacketListener* packetListener;
+	sockaddr_in serverAddr;
+
+public:
+	CustomUdpListener(int port, osc::OscPacketListener* listener)
+		: packetListener(listener) {
+		// Initialize Winsock
+		WSADATA wsaData;
+		if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+			throw std::runtime_error("WSAStartup failed");
+		}
+
+		// Create the socket
+		sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (sock_fd == INVALID_SOCKET) {
+			WSACleanup();
+			throw std::runtime_error("Socket creation failed");
+		}
+
+		// Set the receive buffer size
+		int buffer_size = MAX_OSC_PACKET_SIZE;
+		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char*)&buffer_size, sizeof(buffer_size)) == SOCKET_ERROR) {
+			closesocket(sock_fd);
+			WSACleanup();
+			throw std::runtime_error("Failed to set socket buffer size");
+		}
+
+		// Bind the socket
+		memset(&serverAddr, 0, sizeof(serverAddr));
+		serverAddr.sin_family = AF_INET;
+		serverAddr.sin_addr.s_addr = INADDR_ANY;
+		serverAddr.sin_port = htons(port);
+
+		if (bind(sock_fd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
+			closesocket(sock_fd);
+			WSACleanup();
+			throw std::runtime_error("Failed to bind socket");
+		}
+	}
+
+	~CustomUdpListener() {
+		closesocket(sock_fd);
+		WSACleanup();
+	}
+
+	void run() {
+		while (true) {
+			sockaddr_in clientAddr;
+			int clientAddrLen = sizeof(clientAddr);
+
+			// Receive the data
+			int receivedBytes = recvfrom(sock_fd, buffer, MAX_OSC_PACKET_SIZE, 0, (struct sockaddr*)&clientAddr, &clientAddrLen);
+			if (receivedBytes > 0) {
+				try {
+					// Pass the raw packet data to ProcessPacket
+					packetListener->ProcessPacket(buffer, receivedBytes, IpEndpointName(clientAddr.sin_addr.s_addr, ntohs(clientAddr.sin_port)));
+				}
+				catch (const osc::Exception& e) {
+					std::cerr << "Error processing OSC packet: " << e.what() << std::endl;
+				}
+			}
+		}
+	}
+};
+
+/* starting listerenr server thread */
+void multi_track_OSC_listen_thread(t_multi_track* x)
+{
+	// create new thread + begin execution
+	if (x->listener_thread == NULL) {
+
+		systhread_create((method)multi_track_OSC_listener, x, 0, 0, 0, &x->listener_thread);
+	}
+}
+
+
+void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
+	(void)argc; // Suppress unused parameter warnings
+	(void)argv; // Suppress unused parameter warnings
+
+	try {
+		multi_track_packetListener listener;
+
+		// Map struct variables to listener's local variables
+		//x->server_predicted = &listener.server_predicted;
+		//x->server_ready = &listener.server_ready;
+		//x->python_import_done = &listener.python_import_done;
+
+		// Map listener variables to the corresponding struct variables
+		listener.bass_outlet = x->bass_outlet;
+		listener.drums_outlet = x->drums_outlet;
+		listener.guitar_outlet = x->guitar_outlet;
+		listener.piano_outlet = x->piano_outlet;
+
+
+		listener.bass_index = *x->bass_index;        // Index for bass buffer
+		listener.drums_index = *x->drums_index;      // Index for drums buffer
+		listener.guitar_index = *x->guitar_index;    // Index for guitar buffer
+		listener.piano_index = *x->piano_index;      // Index for piano buffer
+
+		//listener.calculated_samples = &x->calculated_samples;
+
+
+		listener.out_tread_control = x->out_tread_control;
+		listener.server_control = x->server_control;
+		listener.python_import_control = x->python_import_control;
+
+		// Create and configure the custom listener
+		CustomUdpListener udpListener(x->PORT_LISTENER, &listener);
+
+		// Start listening for OSC messages
+		udpListener.run();
+	}
+	catch (const std::exception& e) {
+		post("Error starting OSC listener: %s", e.what());
+	}
+
+	return NULL;
+}
+
