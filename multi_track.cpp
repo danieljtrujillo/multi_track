@@ -274,10 +274,11 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 
 		x->verbose_flag = 0;
 
-		x->bass_index = new int(0);        // Initialize bass index to 0
-		x->drums_index = new int(0);       // Initialize drums index to 0
-		x->guitar_index = new int(0);      // Initialize guitar index to 0
-		x->piano_index = new int(0);       // Initialize piano index to 0
+		// Dynamically allocate the indices
+		x->bass_index = new int(0);
+		x->drums_index = new int(0);
+		x->guitar_index = new int(0);
+		x->piano_index = new int(0);
 					
 		//x->lpExecInfo = NULL;			/* no need to be initialised */
 		
@@ -458,6 +459,12 @@ void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* ar
 	post("All planes sent successfully.");
 	post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>data import ended"); timestamp();
 
+	// Reset all instrument indices
+	*x->bass_index = 0;
+	*x->drums_index = 0;
+	*x->guitar_index = 0;
+	*x->piano_index = 0;
+
 	// Send triger to start prediction process
 	multi_track_OSC_time_to_predict_sender(x);
 }
@@ -637,10 +644,11 @@ void multi_track_send_reset(t_multi_track* x) {
 	post("Sent OSC message: /reset");
 
 	// Reset all instrument indices
-	x->bass_index = 0;
-	x->drums_index = 0;
-	x->guitar_index = 0;
-	x->piano_index = 0;
+	*x->bass_index = 0;
+	*x->drums_index = 0;
+	*x->guitar_index = 0;
+	*x->piano_index = 0;
+
 	post("Reset indexes");
 }
 
@@ -986,7 +994,7 @@ void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long 
 		transmitSocket.Send(p.Data(), p.Size());
 
 		// Optional: Add a small delay to avoid overwhelming the receiver
-		std::this_thread::sleep_for(std::chrono::milliseconds(100));
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 }
 
@@ -1066,10 +1074,16 @@ public:
 	void* guitar_outlet;
 	void* piano_outlet;
 
-	int bass_index;        // Index for bass buffer
-	int drums_index;       // Index for drums buffer
-	int guitar_index;      // Index for guitar buffer
-	int piano_index;       // Index for piano buffer
+	//int bass_index;        // Index for bass buffer
+	//int drums_index;       // Index for drums buffer
+	//int guitar_index;      // Index for guitar buffer
+	//int piano_index;       // Index for piano buffer
+
+
+	int* bass_index;
+	int* drums_index;
+	int* guitar_index;
+	int* piano_index;
 
 	//int* calculated_samples;
 
@@ -1147,10 +1161,10 @@ public:
 
 				if (server_predicted) {
 					// Reset all instrument indices
-					bass_index = 0;
-					drums_index = 0;
-					guitar_index = 0;
-					piano_index = 0;
+					*bass_index = 0;
+					*drums_index = 0;
+					*guitar_index = 0;
+					*piano_index = 0;
 
 					//post("Server finished prediction. Resetting instrument indices to 0.");
 					post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>receive ended"); timestamp();
@@ -1200,19 +1214,19 @@ public:
 
 			if (std::strcmp(m.AddressPattern(), "/bass") == 0) {
 				target_outlet = bass_outlet;
-				current_index = &bass_index;
+				current_index = bass_index;
 			}
 			else if (std::strcmp(m.AddressPattern(), "/drums") == 0) {
 				target_outlet = drums_outlet;
-				current_index = &drums_index;
+				current_index = drums_index;
 			}
 			else if (std::strcmp(m.AddressPattern(), "/guitar") == 0) {
 				target_outlet = guitar_outlet;
-				current_index = &guitar_index;
+				current_index = guitar_index;
 			}
 			else if (std::strcmp(m.AddressPattern(), "/piano") == 0) {
 				target_outlet = piano_outlet;
-				current_index = &piano_index;
+				current_index = piano_index;
 			}
 			else {
 				//post("Unknown address pattern: %s", m.AddressPattern());
@@ -1361,10 +1375,10 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 		listener.piano_outlet = x->piano_outlet;
 
 
-		listener.bass_index = *x->bass_index;        // Index for bass buffer
-		listener.drums_index = *x->drums_index;      // Index for drums buffer
-		listener.guitar_index = *x->guitar_index;    // Index for guitar buffer
-		listener.piano_index = *x->piano_index;      // Index for piano buffer
+		listener.bass_index = x->bass_index;        // Index for bass buffer
+		listener.drums_index = x->drums_index;      // Index for drums buffer
+		listener.guitar_index = x->guitar_index;    // Index for guitar buffer
+		listener.piano_index = x->piano_index;      // Index for piano buffer
 
 		//listener.calculated_samples = &x->calculated_samples;
 
