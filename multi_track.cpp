@@ -52,6 +52,9 @@
 
 #include <tlhelp32.h>
 
+#include <winhttp.h>
+#pragma comment(lib, "winhttp.lib")
+
 
 
 //using namespace std::placeholders;
@@ -144,6 +147,7 @@ typedef struct _multi_track {
 	char server_ip[512] = { 0 };
 
 	int predict_flags[4];  // 1 = predict (send), 0 = skip
+	int read_flag[4];  // 1 = read (send), 0 = skip
 
 } t_multi_track;
 
@@ -185,6 +189,7 @@ void		get_public_ip(char* ip_buffer, size_t buffer_size);
 void		multi_track_get_client_ip(t_multi_track* x);
 
 void		multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
+void		multi_track_set_read_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
 void		multi_track_send_predict_instruments(t_multi_track* x);
 
 void		timestamp();
@@ -235,6 +240,8 @@ void ext_main(void* r)
 	class_addmethod(c, (method)multi_track_OSC_time_to_predict_sender, "predict", 0); // to manually precit
 
 	class_addmethod(c, (method)multi_track_set_predict_instruments, "predict_instruments", A_GIMME, 0);
+	class_addmethod(c, (method)multi_track_set_read_instruments, "read_instruments", A_GIMME, 0);
+	
 
 	/* attributes */
 	CLASS_ATTR_LONG(c, "verb", 0, t_multi_track, verbose_flag);
@@ -304,11 +311,12 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		x->package_size = 10240;  // Default packet size
 
 		get_public_ip(x->client_ip, sizeof(x->client_ip));
-		strncpy(x->client_ip, x->client_ip, sizeof(x->client_ip) - 1);
+		// strncpy(x->client_ip, x->client_ip, sizeof(x->client_ip) - 1);
 		post("Public IP: %s", x->client_ip);
 
 		for (int i = 0; i < 4; i++) {
 			x->predict_flags[i] = 0;  // Default: predict non of the instruments
+			x->read_flag[i] = 0;	// Default: read non of the instruments
 		}
 
 		
@@ -435,7 +443,7 @@ void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* ar
 	std::thread* threads[4] = { nullptr };
 
 	for (int i = 0; i < 4; i++) {
-		if (x->predict_flags[i] == 0) {  // Send only if NOT predicted
+		if (x->read_flag[i] == 1) {  // Send only if read falag is 1
 			threads[i] = new std::thread(send_matrix_plane, matrix_data, i, info.dim[0], info.dim[1],
 				info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER,
 				plane_tags[i], x->package_size);
@@ -551,11 +559,18 @@ void multi_track_set_pr_win_mul(t_multi_track* x, double new_pr_win_mul) {
 
 
 void multi_track_test_packet(t_multi_track* x) {
-	post("Starting packet test with size %d", x->package_size);
+	// Only announce when verbose
+	if (x->verbose_flag) {
+		post("Starting packet test with size %d (floats)", x->package_size);
+	}
 
 	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
 	char osc_buffer[OUTPUT_BUFFER_SIZE];
 
+	// High-resolution timers
+	auto t0 = std::chrono::high_resolution_clock::now();
+
+	// Build OSC message
 	osc::OutboundPacketStream p(osc_buffer, OUTPUT_BUFFER_SIZE);
 	p.Clear();
 	p << osc::BeginMessage("/packet_test") << x->package_size;
@@ -565,10 +580,31 @@ void multi_track_test_packet(t_multi_track* x) {
 		float rand_value = static_cast<float>(rand()) / RAND_MAX;
 		p << rand_value;
 	}
-
 	p << osc::EndMessage;
+
+	auto t1 = std::chrono::high_resolution_clock::now();
+
+	// Send
 	transmitSocket.Send(p.Data(), p.Size());
+
+	auto t2 = std::chrono::high_resolution_clock::now();
+
+	if (x->verbose_flag) {
+		// Timings
+		double build_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+		double send_ms = std::chrono::duration<double, std::milli>(t2 - t1).count();
+
+		// Sizes and rates
+		const size_t bytes_sent = p.Size();
+		const double mb_sent = static_cast<double>(bytes_sent) / (1024.0 * 1024.0);
+		const double mbit_sent = static_cast<double>(bytes_sent) * 8.0 / 1e6;
+		const double mbps = (send_ms > 0.0) ? (mbit_sent / (send_ms / 1000.0)) : 0.0;
+
+		post("Packet test built in %.3f ms, sent in %.3f ms", build_ms, send_ms);
+		post("Bytes sent: %zu (%.3f MB); Effective rate: %.3f Mbit/s", bytes_sent, mb_sent, mbps);
+	}
 }
+
 
 
 void multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
@@ -580,11 +616,11 @@ void multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long arg
 	for (int i = 0; i < 4; i++) {
 		if (atom_gettype(&argv[i]) == A_LONG) {
 			int value = atom_getlong(&argv[i]);
-			if (value == 1 || value == 0 || value == -1) {
+			if (value == 1 || value == 0) {
 				x->predict_flags[i] = value;
 			}
 			else {
-				post("Error: Argument %d must be 1 (predict), 0 (send), or -1 (ignore), received %d", i, value);
+				post("Error: Argument %d must be 1 (predict), 0 (not predict) received %d", i, value);
 				return;
 			}
 		}
@@ -598,6 +634,36 @@ void multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long arg
 		x->predict_flags[0], x->predict_flags[1], x->predict_flags[2], x->predict_flags[3]);
 
 	multi_track_send_predict_instruments(x);
+}
+
+
+void multi_track_set_read_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
+	if (argc != 4) {
+		post("Error: predict_instruments requires exactly 4 arguments (bass, drums, guitar, piano), received %ld", argc);
+		return;
+	}
+
+	for (int i = 3; i >= 0; i--) {
+		if (atom_gettype(&argv[i]) == A_LONG) {
+			int value = atom_getlong(&argv[i]);
+			if (value == 1 || value == 0) {
+				x->read_flag[i] = value;
+			}
+			else {
+				post("Error: Argument %d must be 1 (predict), 0 (not predict) received %d", i, value);
+				return;
+			}
+		}
+		else {
+			post("Error: Argument %d is not an integer!", i);
+			return;
+		}
+	}
+
+	post("Read instruments updated: bass=%d drums=%d guitar=%d piano=%d",
+		x->read_flag[0], x->read_flag[1], x->read_flag[2], x->read_flag[3]);
+
+	//multi_track_send_predict_instruments(x);
 }
 
 
@@ -659,84 +725,193 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 		return;
 	}
 
-	// Get the command from Max
-	char* command = atom_getsym(argv)->s_name;
-
-	// Store the full command
-	strncpy(x->command_str, command, sizeof(x->command_str) - 1);
+	// 1) Raw command from Max (quotes are already unescaped here)
+	const char* raw = atom_getsym(argv)->s_name;
+	strncpy(x->command_str, raw, sizeof(x->command_str) - 1);
 	x->command_str[sizeof(x->command_str) - 1] = '\0';
 
-	// Default server IP (assumes server is local)
+	// 2) Default server_ip; parse from command if present
 	strncpy(x->server_ip, "127.0.0.1", sizeof(x->server_ip) - 1);
 	x->server_ip[sizeof(x->server_ip) - 1] = '\0';
 
-	// Find "--server_ip" in the command
-	char* server_ip_flag = strstr(command, "--server_ip");
-	if (server_ip_flag) {
-		// Move past "--server_ip"
-		server_ip_flag += strlen("--server_ip");
-
-		// Skip spaces
-		while (*server_ip_flag == ' ') server_ip_flag++;
-
-		// Extract only the IP (stop at space or end of string)
-		char* end = server_ip_flag;
-		while (*end && *end != ' ') end++; // Stop at first space
-
-		// Copy the extracted IP
-		size_t ip_length = end - server_ip_flag;
-		if (ip_length < sizeof(x->server_ip)) {
-			strncpy(x->server_ip, server_ip_flag, ip_length);
-			x->server_ip[ip_length] = '\0'; // Null-terminate
+	if (char* flag = strstr(x->command_str, "--server_ip")) {
+		flag += (int)strlen("--server_ip");
+		while (*flag == ' ') flag++;
+		char* end = flag;
+		while (*end && *end != ' ' && *end != '\"') end++;  // stop at space or closing quote
+		size_t ip_len = (size_t)(end - flag);
+		if (ip_len > 0 && ip_len < sizeof(x->server_ip)) {
+			strncpy(x->server_ip, flag, ip_len);
+			x->server_ip[ip_len] = '\0';
 		}
 	}
 
-	post("Command set to: %s", x->command_str);
+	// 3) Refresh client IP (your get_public_ip now returns the public IP and logs both)
+	get_public_ip(x->client_ip, sizeof(x->client_ip));
 	post("Server IP set to: %s", x->server_ip);
+	post("Client IP set automatically to: %s", x->client_ip);
+
+	// 4) If --client_ip already present anywhere, keep the command as-is
+	if (strstr(x->command_str, "--client_ip") != NULL) {
+		post("Command set to: %s", x->command_str);
+		return;
+	}
+
+	// 5) Find the inner quoted remote command: inject before the LAST quote
+	char* last_quote = strrchr(x->command_str, '\"');
+	if (last_quote) {
+		// find matching opening quote to scope the block
+		char* open_quote = NULL;
+		for (char* p = last_quote - 1; p >= x->command_str; --p) {
+			if (*p == '\"') { open_quote = p; break; }
+			if (p == x->command_str) break;
+		}
+
+		// If we have a well-formed " ... " block, check if --client_ip already inside (paranoia)
+		if (open_quote && strstr(open_quote, "--client_ip") && strstr(open_quote, "--client_ip") < last_quote) {
+			post("Command set to: %s", x->command_str);
+			return;
+		}
+
+		// Build injection
+		char inject[128];
+		snprintf(inject, sizeof(inject), " --client_ip %s",
+			x->client_ip[0] ? x->client_ip : "0.0.0.0");
+		size_t inject_len = strlen(inject);
+		size_t cmd_len = strlen(x->command_str);
+
+		// Capacity check
+		if (cmd_len + inject_len >= sizeof(x->command_str)) {
+			post("Warning: command too long to inject --client_ip; skipping injection.");
+			post("Command set to: %s", x->command_str);
+			return;
+		}
+
+		// Insert IN-PLACE just before last_quote
+		size_t tail_len = cmd_len - (size_t)(last_quote - x->command_str) + 1; // include '\0'
+		memmove(last_quote + inject_len, last_quote, tail_len);
+		memcpy(last_quote, inject, inject_len);
+
+		post("Command set to: %s", x->command_str);
+		return;
+	}
+
+	// 6) Fallback: no double quotes found — append at end
+	{
+		char inject[128];
+		snprintf(inject, sizeof(inject), " --client_ip %s",
+			x->client_ip[0] ? x->client_ip : "0.0.0.0");
+		if (strlen(x->command_str) + strlen(inject) < sizeof(x->command_str)) {
+			strncat(x->command_str, inject, sizeof(x->command_str) - strlen(x->command_str) - 1);
+			post("Command set to: %s", x->command_str);
+		}
+		else {
+			post("Warning: command too long to append --client_ip; skipping injection.");
+			post("Command set to: %s", x->command_str);
+		}
+	}
 }
+
+
+
 
 
 
 void get_public_ip(char* ip_buffer, size_t buffer_size) {
-	WSADATA wsaData;
-	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		post("WSAStartup failed.");
-		return;
+	// defaults
+	if (!ip_buffer || buffer_size == 0) return;
+	ip_buffer[0] = '\0';
+
+	// ---------- 1) Get outbound interface IP (local/NAT-side) ----------
+	char outbound_ip[64] = { 0 };
+	{
+		WSADATA wsaData;
+		if (WSAStartup(MAKEWORD(2, 2), &wsaData) == 0) {
+			SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
+			if (sock != INVALID_SOCKET) {
+				sockaddr_in server_addr = {};
+				server_addr.sin_family = AF_INET;
+				server_addr.sin_port = htons(80);
+				inet_pton(AF_INET, "8.8.8.8", &server_addr.sin_addr);  // Google DNS
+
+				if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) != SOCKET_ERROR) {
+					sockaddr_in local_addr = {};
+					int addr_len = sizeof(local_addr);
+					if (getsockname(sock, (struct sockaddr*)&local_addr, &addr_len) == 0) {
+						inet_ntop(AF_INET, &local_addr.sin_addr, outbound_ip, sizeof(outbound_ip));
+					}
+				}
+				closesocket(sock);
+			}
+			WSACleanup();
+		}
 	}
 
-	// Create a dummy socket to determine public IP
-	SOCKET sock = socket(AF_INET, SOCK_DGRAM, 0);
-	if (sock == INVALID_SOCKET) {
-		post("Failed to create socket.");
-		WSACleanup();
-		return;
+	// ---------- 2) Fetch true public IP via HTTPS (api.ipify.org) ----------
+	char public_ip[64] = { 0 };
+	bool got_public = false;
+	{
+		HINTERNET hSession = WinHttpOpen(L"multi_track/1.0",
+			WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+			WINHTTP_NO_PROXY_NAME,
+			WINHTTP_NO_PROXY_BYPASS, 0);
+		if (hSession) {
+			HINTERNET hConnect = WinHttpConnect(hSession, L"api.ipify.org",
+				INTERNET_DEFAULT_HTTPS_PORT, 0);
+			if (hConnect) {
+				// root path returns plain text IP
+				HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", L"/",
+					NULL, WINHTTP_NO_REFERER,
+					WINHTTP_DEFAULT_ACCEPT_TYPES,
+					WINHTTP_FLAG_SECURE);
+				if (hRequest &&
+					WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+						WINHTTP_NO_REQUEST_DATA, 0, 0, 0) &&
+					WinHttpReceiveResponse(hRequest, NULL)) {
+
+					DWORD avail = 0, read = 0;
+					std::string body;
+					do {
+						if (!WinHttpQueryDataAvailable(hRequest, &avail) || avail == 0) break;
+						std::string chunk(avail, '\0');
+						if (!WinHttpReadData(hRequest, &chunk[0], avail, &read) || read == 0) break;
+						chunk.resize(read);
+						body += chunk;
+					} while (avail > 0);
+
+					if (!body.empty()) {
+						// Trim whitespace/newlines just in case
+						while (!body.empty() && (body.back() == '\r' || body.back() == '\n' || body.back() == ' ' || body.back() == '\t'))
+							body.pop_back();
+						strncpy(public_ip, body.c_str(), sizeof(public_ip) - 1);
+						public_ip[sizeof(public_ip) - 1] = '\0';
+						got_public = true;
+					}
+				}
+				if (hRequest) WinHttpCloseHandle(hRequest);
+				WinHttpCloseHandle(hConnect);
+			}
+			WinHttpCloseHandle(hSession);
+		}
 	}
 
-	// Connect to a public DNS server (Google's 8.8.8.8)
-	struct sockaddr_in server_addr;
-	memset(&server_addr, 0, sizeof(server_addr));
-	server_addr.sin_family = AF_INET;
-	server_addr.sin_port = htons(80);
-	inet_pton(AF_INET, "8.8.8.8", &server_addr.sin_addr);
-
-	if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == SOCKET_ERROR) {
-		post("Failed to connect socket.");
-		closesocket(sock);
-		WSACleanup();
-		return;
+	// ---------- 3) Log both & choose return value ----------
+	post("Outbound interface IP: %s", outbound_ip[0] ? outbound_ip : "(unknown)");
+	if (got_public) {
+		post("Public (NAT) IP: %s", public_ip);
+		strncpy(ip_buffer, public_ip, buffer_size - 1);
+		ip_buffer[buffer_size - 1] = '\0';
 	}
-
-	// Get the local socket's IP address
-	struct sockaddr_in local_addr;
-	int addr_len = sizeof(local_addr);
-	getsockname(sock, (struct sockaddr*)&local_addr, &addr_len);
-
-	// Convert IP to string
-	inet_ntop(AF_INET, &local_addr.sin_addr, ip_buffer, buffer_size);
-
-	closesocket(sock);
-	WSACleanup();
+	else {
+		post("Public (NAT) IP: (failed to fetch via HTTPS)");
+		// fall back to outbound if we have it
+		if (outbound_ip[0]) {
+			strncpy(ip_buffer, outbound_ip, buffer_size - 1);
+			ip_buffer[buffer_size - 1] = '\0';
+		}
+	}
 }
+
 
 void multi_track_get_client_ip(t_multi_track* x) {
 	get_public_ip(x->client_ip, sizeof(x->client_ip));
