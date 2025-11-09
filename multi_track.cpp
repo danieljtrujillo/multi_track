@@ -149,6 +149,12 @@ typedef struct _multi_track {
 	int predict_flags[4];  // 1 = predict (send), 0 = skip
 	int read_flag[4];  // 1 = read (send), 0 = skip
 
+	std::chrono::high_resolution_clock::time_point packet_test_start_time;  // For round-trip timing
+	std::chrono::high_resolution_clock::time_point data_import_start_time;  // For data import timing
+	std::chrono::high_resolution_clock::time_point data_import_end_time;    // For data import end timing
+
+	bool auto_load_model_on_ready;  // Flag to auto-load model when server is ready
+
 } t_multi_track;
 
 
@@ -319,7 +325,8 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 			x->read_flag[i] = 0;	// Default: read non of the instruments
 		}
 
-		
+		x->auto_load_model_on_ready = false;  // Initialize auto-load flag
+
 	}
 	return x;
 
@@ -382,7 +389,13 @@ void multi_track_free(t_multi_track* x) {
 /****** getting and sending data from matrix ********/
 
 void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
-	post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>data import started"); timestamp();
+	// Start timing
+	x->data_import_start_time = std::chrono::high_resolution_clock::now();
+
+	if (x->verbose_flag) {
+		post("========================================");
+		post("Data import started...");
+	}
 
 	if (argc < 1 || atom_gettype(argv) != A_SYM) {
 		object_error((t_object*)x, "Invalid input. Expected a matrix name.");
@@ -464,8 +477,15 @@ void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* ar
 	// Unlock the matrix
 	jit_object_method(matrix, gensym("lock"), lock);
 
-	post("All planes sent successfully.");
-	post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>data import ended"); timestamp();
+	// End timing
+	x->data_import_end_time = std::chrono::high_resolution_clock::now();
+	double import_time_ms = std::chrono::duration<double, std::milli>(x->data_import_end_time - x->data_import_start_time).count();
+
+	if (x->verbose_flag) {
+		post("All planes sent successfully.");
+		post("Data import completed in %.3f ms", import_time_ms);
+		post("========================================");
+	}
 
 	// Reset all instrument indices
 	*x->bass_index = 0;
@@ -588,6 +608,9 @@ void multi_track_test_packet(t_multi_track* x) {
 	transmitSocket.Send(p.Data(), p.Size());
 
 	auto t2 = std::chrono::high_resolution_clock::now();
+
+	// Store the start time for round-trip measurement
+	x->packet_test_start_time = t0;
 
 	if (x->verbose_flag) {
 		// Timings
@@ -796,7 +819,7 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 		return;
 	}
 
-	// 6) Fallback: no double quotes found — append at end
+	// 6) Fallback: no double quotes found ï¿½ append at end
 	{
 		char inject[128];
 		snprintf(inject, sizeof(inject), " --client_ip %s",
@@ -1063,16 +1086,10 @@ void multi_track_server(t_multi_track* x, long command) {
 		x->server_job = hJob;
 		CloseHandle(pi.hThread);
 
-		post("Server started.");
-		//*x->server_ready = false;
-		//x->server_control->waitforit();
+		// Set flag to auto-load model when server signals ready
+		x->auto_load_model_on_ready = true;
 
-		//if (x->filename[0] != 0) {
-		//	multi_track_OSC_load_model(x, x->filename);
-		//	//*x->server_ready = false;
-		//	//x->server_control->waitforit();
-		//}
-		//
+		post("Server started. Waiting for server ready signal...");
 	}
 	else if (command == 0) { // Stop the server
 		if (x->server_process) {
@@ -1262,6 +1279,12 @@ public:
 
 	//int* calculated_samples;
 
+	std::chrono::high_resolution_clock::time_point* packet_test_start_time;  // Pointer to start time
+	std::chrono::high_resolution_clock::time_point* data_import_start_time;  // Pointer to data import start time
+	int* verbose_flag;  // Pointer to verbose flag
+	bool* auto_load_model_on_ready;  // Pointer to auto-load flag
+	t_multi_track* multi_track_obj;  // Pointer to main object for calling methods
+
 	/* these are local variables that will be aslo read form object variables */
 	//bool server_predicted=false;
 	//bool server_ready = false;   ///////////////////////////////////////// this need to be fasle in the end verison
@@ -1311,19 +1334,26 @@ public:
 			//	python_import_control->notify();
 			//}
 
-			///* Here comes signal that server is loaded and running */
-			//if (std::strcmp(m.AddressPattern(), "/ready") == 0) {
-			//	osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+			/* Here comes signal that server is loaded and running */
+			if (std::strcmp(m.AddressPattern(), "/ready") == 0) {
+				osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+				bool server_ready;
+				args >> server_ready >> osc::EndMessage;
 
-			//	/**** Here we read osc message with local variable. this is read from the main stuct also by pointer ***/
+				if (server_ready) {
+					post("Server is ready!");
 
-			//	server_control->lock();
-			//	args >> server_ready >> osc::EndMessage;
-			//	server_control->unlock();
+					// Auto-load model if flag is set
+					if (*auto_load_model_on_ready) {
+						post("Auto-loading model...");
+						multi_track_load_model(multi_track_obj);
+						*auto_load_model_on_ready = false;  // Reset flag after loading
+					}
 
-			//	/***** notify main thread server starting function that is waiting for this ****/
-			//	server_control->notify();
-			//}
+					// Notify waiting processes
+					server_control->notify();
+				}
+			}
 
 			/* Here comes signal that server is done sending predicted data */
 			if (std::strcmp(m.AddressPattern(), "/server_predicted") == 0) {
@@ -1341,8 +1371,16 @@ public:
 					*guitar_index = 0;
 					*piano_index = 0;
 
-					//post("Server finished prediction. Resetting instrument indices to 0.");
-					post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>receive ended"); timestamp();
+					// Calculate total processing time
+					auto receive_end_time = std::chrono::high_resolution_clock::now();
+					double total_time_ms = std::chrono::duration<double, std::milli>(receive_end_time - *data_import_start_time).count();
+
+					if (*verbose_flag) {
+						post("========================================");
+						post("Data receive completed");
+						post("Total processing time: %.3f ms", total_time_ms);
+						post("========================================");
+					}
 
 					// Notify waiting processes
 					out_tread_control->notify();
@@ -1350,6 +1388,10 @@ public:
 			}
 
 			if (std::strcmp(m.AddressPattern(), "/packet_test_response") == 0) {
+				// Calculate round-trip time
+				auto t_received = std::chrono::high_resolution_clock::now();
+				double round_trip_ms = std::chrono::duration<double, std::milli>(t_received - *packet_test_start_time).count();
+
 				osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
 				int received_size;
 				args >> received_size;
@@ -1366,8 +1408,10 @@ public:
 					count++;
 				}
 
-				// Print the results
-				post("Packet test completed. Received %d floats.", received_size);
+				// Print the results with round-trip time
+				post("========================================");
+				post("Packet test completed. Round-trip time: %.3f ms", round_trip_ms);
+				post("Received %d floats.", received_size);
 
 				// Verify if the number of values matches the expected size
 				if (count == received_size) {
@@ -1376,6 +1420,7 @@ public:
 				else {
 					post("WARNING: Expected %d values but received %d.", received_size, count);
 				}
+				post("========================================");
 
 				// Free allocated memory
 				delete[] received_values;
@@ -1557,6 +1602,11 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 
 		//listener.calculated_samples = &x->calculated_samples;
 
+		listener.packet_test_start_time = &x->packet_test_start_time;  // Map packet test timing
+		listener.data_import_start_time = &x->data_import_start_time;  // Map data import timing
+		listener.verbose_flag = &x->verbose_flag;  // Map verbose flag
+		listener.auto_load_model_on_ready = &x->auto_load_model_on_ready;  // Map auto-load flag
+		listener.multi_track_obj = x;  // Map main object pointer
 
 		listener.out_tread_control = x->out_tread_control;
 		listener.server_control = x->server_control;
