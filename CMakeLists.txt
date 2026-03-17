@@ -23,8 +23,8 @@ add_library(
 )
 
 # Link oscpack and Windows libraries
-target_link_libraries(${PROJECT_NAME}
-	"${CMAKE_CURRENT_SOURCE_DIR}/../../../oscpack_1_1_0/build/Debug/oscpack.lib"
+target_link_libraries(${PROJECT_NAME} PRIVATE
+	"${CMAKE_CURRENT_SOURCE_DIR}/../../../oscpack_1_1_0/build/$<CONFIG>/oscpack.lib"
 	Ws2_32.lib
 	winmm.lib
 )

@@ -1,0 +1,15 @@
+{
+	"author" : "Tornike Karchkhadze",
+	"description" : "Multi-track music arrangement generation Latent Diffusion Moldel (LDM) via a Python server",
+	"displayname" : "multi_track",
+	"max_version_min" : "8.0.0",
+	"name" : "multi_track",
+	"os" : {
+		"windows" : {
+			"platform" : [ "x64" ],
+			"min_version" : "10"
+		}
+	},
+	"tags" : [ "audio", "neural network", "source separation", "OSC" ],
+	"version" : "1.0.0"
+}

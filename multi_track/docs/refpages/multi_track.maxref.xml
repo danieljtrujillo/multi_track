@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml-stylesheet href="./_c74_ref.xsl" type="text/xsl"?>
+<c74object name="multi_track" module="max">
+
+	<digest>Multi-track audio source separation via neural network Python server</digest>
+
+	<description>
+		Sends audio data to a Python server over OSC for neural network inference,
+		separating audio into four instrument stems: bass, drums, guitar, and piano.
+		Communicates via OSC on configurable UDP ports.
+	</description>
+
+	<inletlist>
+		<inlet id="0" type="message">
+			<digest>Messages and jit_matrix input</digest>
+		</inlet>
+	</inletlist>
+
+	<outletlist>
+		<outlet id="0" type="message">
+			<digest>Bass — outputs index/value pairs of bass audio data</digest>
+		</outlet>
+		<outlet id="1" type="message">
+			<digest>Drums — outputs index/value pairs of drums audio data</digest>
+		</outlet>
+		<outlet id="2" type="message">
+			<digest>Guitar — outputs index/value pairs of guitar audio data</digest>
+		</outlet>
+		<outlet id="3" type="message">
+			<digest>Piano — outputs index/value pairs of piano audio data</digest>
+		</outlet>
+	</outletlist>
+
+	<methodlist>
+
+		<method name="jit_matrix">
+			<arglist>
+				<arg name="matrix-name" type="symbol" optional="0" />
+			</arglist>
+			<digest>Send a Jitter matrix to the Python server for processing</digest>
+			<description>
+				Accepts a float32 Jitter matrix with 4 planes (one per instrument: bass, drums, guitar, piano)
+				and sends it to the Python server for source separation inference.
+			</description>
+		</method>
+
+		<method name="server">
+			<arglist>
+				<arg name="state" type="int" optional="0" />
+			</arglist>
+			<digest>Start or stop the Python server</digest>
+			<description>
+				Send <m>server 1</m> to launch the Python server using the command set via <m>set_command</m>.
+				The external will automatically send <m>load_model</m> once the server reports ready.
+				Send <m>server 0</m> to stop the server.
+			</description>
+		</method>
+
+		<method name="set_command">
+			<arglist>
+				<arg name="command" type="list" optional="0" />
+			</arglist>
+			<digest>Set the shell command used to launch the Python server</digest>
+			<description>
+				Example: <m>set_command python server.py --server_ip 192.168.1.100</m>
+			</description>
+		</method>
+
+		<method name="load_model">
+			<digest>Manually send the load model command to the Python server</digest>
+		</method>
+
+		<method name="predict">
+			<digest>Manually trigger a prediction on the Python server</digest>
+		</method>
+
+		<method name="verbose">
+			<arglist>
+				<arg name="state" type="int" optional="0" />
+			</arglist>
+			<digest>Enable or disable verbose logging and timing output</digest>
+			<description>
+				When enabled (1), prints data import time, round-trip processing time,
+				packet test times, and network throughput to the Max console.
+			</description>
+		</method>
+
+		<method name="percentage">
+			<arglist>
+				<arg name="value" type="float" optional="0" />
+			</arglist>
+			<digest>Set the processing percentage (0.0 – 1.0)</digest>
+		</method>
+
+		<method name="pr_win_mul">
+			<arglist>
+				<arg name="value" type="float" optional="0" />
+			</arglist>
+			<digest>Set the processing window multiplier (0.0 – 2.0)</digest>
+		</method>
+
+		<method name="packet_size">
+			<arglist>
+				<arg name="size" type="int" optional="0" />
+			</arglist>
+			<digest>Set the OSC packet size in floats (128 – 16384, default: 10240)</digest>
+		</method>
+
+		<method name="predict_instruments">
+			<arglist>
+				<arg name="bass" type="int" optional="0" />
+				<arg name="drums" type="int" optional="0" />
+				<arg name="guitar" type="int" optional="0" />
+				<arg name="piano" type="int" optional="0" />
+			</arglist>
+			<digest>Tell the Python server which instruments to run inference on (1 = yes, 0 = no)</digest>
+			<description>
+				Send a list of four 0s and 1s — one per instrument in order: bass drums guitar piano.
+				1 means run inference for that instrument, 0 means skip it.
+				Example: <m>predict_instruments 1 1 0 0</m> runs inference for bass and drums only.
+				The selection is sent to the Python server over OSC.
+			</description>
+		</method>
+
+		<method name="read_instruments">
+			<arglist>
+				<arg name="bass" type="int" optional="0" />
+				<arg name="drums" type="int" optional="0" />
+				<arg name="guitar" type="int" optional="0" />
+				<arg name="piano" type="int" optional="0" />
+			</arglist>
+			<digest>Select which planes of the input Jitter matrix to read (1 = yes, 0 = no)</digest>
+			<description>
+				Send a list of four 0s and 1s — one per instrument in order: bass drums guitar piano.
+				1 means read that instrument's plane from the input Jitter matrix, 0 means skip it.
+				Example: <m>read_instruments 1 1 0 0</m> reads only the bass and drums planes.
+			</description>
+		</method>
+
+		<method name="test_packet">
+			<digest>Send a test OSC packet and measure round-trip time</digest>
+		</method>
+
+		<method name="print">
+			<digest>Send a print command to the Python server</digest>
+		</method>
+
+		<method name="reset">
+			<digest>Reset all instrument indices</digest>
+		</method>
+
+		<method name="get_client_ip">
+			<digest>Fetch and display the client's public IP address</digest>
+		</method>
+
+	</methodlist>
+
+	<misc name="Discussion">
+		<entry name="Network Configuration">
+			<description>
+				Default ports: sender 7000, listener 8000.
+				The server IP is set via the --server_ip flag in <m>set_command</m>.
+				The client IP is auto-detected via api.ipify.org.
+			</description>
+		</entry>
+		<entry name="Python Server Protocol">
+			<description>
+				The server must send <m>/ready true</m> when ready, and <m>/server_predicted true</m>
+				when processing is complete. Audio results are returned as OSC messages
+				on /bass, /drums, /guitar, /piano with index and float array data.
+			</description>
+		</entry>
+	</misc>
+
+	<attributelist>
+
+		<attribute name="verb" get="1" set="1" type="int" size="1">
+			<digest>Enable or disable verbose logging (0 = off, 1 = on)</digest>
+			<description>
+				When set to 1, prints timing and data flow information to the Max console,
+				including data import time, round-trip processing time, and network throughput.
+				Same as sending the <m>verbose</m> message.
+			</description>
+		</attribute>
+
+	</attributelist>
+
+	<seealso>
+		<object name="jit.matrix" />
+	</seealso>
+
+</c74object>
