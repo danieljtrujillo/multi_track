@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 34.0, 76.0, 1302.0, 810.0 ],
+		"rect" : [ -1886.0, 77.0, 1585.0, 1049.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -39,6 +39,55 @@
 		"subpatcher_template" : "",
 		"showontab" : 1,
 		"boxes" : [ 			{
+				"box" : 				{
+					"id" : "obj-340",
+					"maxclass" : "button",
+					"numinlets" : 1,
+					"numoutlets" : 1,
+					"outlettype" : [ "bang" ],
+					"parameter_enable" : 0,
+					"patching_rect" : [ 1405.1011962890625, 267.762054443359375, 24.0, 24.0 ]
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-337",
+					"linecount" : 3,
+					"maxclass" : "textedit",
+					"numinlets" : 1,
+					"numoutlets" : 4,
+					"outlettype" : [ "", "int", "", "" ],
+					"parameter_enable" : 0,
+					"patching_rect" : [ 1158.4794921875, 352.46099853515625, 478.4727783203125, 70.05072021484375 ],
+					"text" : "set_command \"ssh -t karchkhadze@reach1.ircam.fr \\\"bash -l -c 'cd musical-accompaniment-ldm && conda run -n ctm_gen python server.py --serverport 7000 --clientport 8000'\\\"\"\n"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-163",
+					"maxclass" : "newobj",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 509.375, 243.75, 32.0, 22.0 ],
+					"text" : "print"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"id" : "obj-54",
+					"maxclass" : "newobj",
+					"numinlets" : 0,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 979.0, 366.0, 69.0, 22.0 ],
+					"text" : "r command"
+				}
+
+			}
+, 			{
 				"box" : 				{
 					"bubble" : 1,
 					"fontname" : "Arial",
@@ -89,7 +138,7 @@
 					"outlettype" : [ "", "int", "", "" ],
 					"parameter_enable" : 0,
 					"patching_rect" : [ 1781.91455078125, 629.838134765625, 461.46026611328125, 87.678070068359375 ],
-					"text" : "set_command \"cmd.exe /K \\\"cd %USERPROFILE%\\\\ctm_pl && C:\\\\Users\\\\karch\\\\anaconda3\\\\envs\\\\ctm_gen\\\\python.exe server.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\""
+					"text" : "set_command \"cmd.exe /K \\\"cd %USERPROFILE%\\\\musical-accompaniment-ldm && C:\\\\Users\\\\karch\\\\anaconda3\\\\envs\\\\ctm_gen\\\\python.exe server.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\""
 				}
 
 			}
@@ -130,7 +179,7 @@
 					"outlettype" : [ "", "int", "", "" ],
 					"parameter_enable" : 0,
 					"patching_rect" : [ 900.33843994140625, 46.452552795410156, 451.4783935546875, 75.835838317871094 ],
-					"text" : "set_command \"ssh -t karchkhadze@reach2.ircam.fr \\\"cd ctm_pl_gen && export CUDA_VISIBLE_DEVICES=1 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server.py --serverport 7000 --clientport 8000 --server_ip 129.102.15.13\\\"\""
+					"text" : "set_command \"ssh -t -R 8000:localhost:8000 karchkhadze@reach2.ircam.fr \\\"cd ctm_pl_gen && export CUDA_VISIBLE_DEVICES=1 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server.py --serverport 7000 --clientport 8000\\\"\""
 				}
 
 			}
@@ -1884,7 +1933,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 561.7021484375, 1023.40423583984375, 50.0, 22.0 ],
-					"text" : "15000."
+					"text" : "1500."
 				}
 
 			}
@@ -1944,7 +1993,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 541.041748046875, 1061.34619140625, 50.0, 22.0 ],
-					"text" : "15000."
+					"text" : "1500."
 				}
 
 			}
@@ -2269,6 +2318,7 @@
 , 							{
 								"name" : "Default M4L-1",
 								"default" : 								{
+									"fontface" : [ 1 ],
 									"fontsize" : [ 11.0 ],
 									"bgfillcolor" : 									{
 										"angle" : 270.0,
@@ -2279,8 +2329,7 @@
 										"type" : "gradient"
 									}
 ,
-									"fontname" : [ "Arial" ],
-									"fontface" : [ 1 ]
+									"fontname" : [ "Arial" ]
 								}
 ,
 								"parentstyle" : "",
@@ -2400,8 +2449,8 @@
 , 							{
 								"name" : "newobjYellow-1",
 								"default" : 								{
-									"fontsize" : [ 12.059008 ],
-									"accentcolor" : [ 0.82517, 0.78181, 0.059545, 1.0 ]
+									"accentcolor" : [ 0.82517, 0.78181, 0.059545, 1.0 ],
+									"fontsize" : [ 12.059008 ]
 								}
 ,
 								"parentstyle" : "",
@@ -2622,13 +2671,13 @@
 					"presentation_rect" : [ 4.989473342895508, 42.37103271484375, 81.190475463867188, 26.177619934082031 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_longname" : "textbutton[2]",
-							"parameter_initial_enable" : 1,
-							"parameter_invisible" : 1,
 							"parameter_mmax" : 1.0,
 							"parameter_initial" : [ 0 ],
 							"parameter_shortname" : "textbutton",
-							"parameter_type" : 3
+							"parameter_type" : 3,
+							"parameter_longname" : "textbutton[2]",
+							"parameter_initial_enable" : 1,
+							"parameter_invisible" : 1
 						}
 
 					}
@@ -2670,13 +2719,13 @@
 					"presentation_rect" : [ 155.37451171875, 192.645217895507813, 78.0, 54.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_longname" : "Play Speed",
-							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 2.0,
 							"parameter_initial" : [ 1.0 ],
 							"parameter_shortname" : "Play Speed",
 							"parameter_type" : 0,
-							"parameter_unitstyle" : 1
+							"parameter_unitstyle" : 1,
+							"parameter_longname" : "Play Speed",
+							"parameter_initial_enable" : 1
 						}
 
 					}
@@ -2707,13 +2756,13 @@
 					"presentation_rect" : [ 164.958786010742188, 36.520187377929688, 57.0, 33.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_longname" : "textbutton[1]",
-							"parameter_initial_enable" : 1,
-							"parameter_invisible" : 1,
 							"parameter_mmax" : 1.0,
 							"parameter_initial" : [ 0 ],
 							"parameter_shortname" : "textbutton",
-							"parameter_type" : 3
+							"parameter_type" : 3,
+							"parameter_longname" : "textbutton[1]",
+							"parameter_initial_enable" : 1,
+							"parameter_invisible" : 1
 						}
 
 					}
@@ -2842,7 +2891,7 @@
 					"outlettype" : [ "", "int", "", "" ],
 					"parameter_enable" : 0,
 					"patching_rect" : [ 1774.809292078018188, 476.680264443159103, 461.460276165008509, 87.678069293498993 ],
-					"text" : "set_command \"cmd.exe /K \\\"cd %USERPROFILE%\\\\ctm_pl && C:\\\\Users\\\\karch\\\\anaconda3\\\\envs\\\\ctm_gen\\\\python.exe server_CD.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\""
+					"text" : "set_command \"cmd.exe /K \\\"cd %USERPROFILE%\\\\musical-accompaniment-ldm && C:\\\\Users\\\\karch\\\\anaconda3\\\\envs\\\\ctm_gen\\\\python.exe server_CD.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\""
 				}
 
 			}
@@ -2920,7 +2969,7 @@
 					"outlettype" : [ "", "int", "", "" ],
 					"parameter_enable" : 0,
 					"patching_rect" : [ 931.622744164466894, 249.214517097473163, 451.478398957252466, 75.835837960243225 ],
-					"text" : "set_command \"ssh -t karchkhadze@reach1.ircam.fr \\\"cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server_CD.py --serverport 7000 --clientport 8000 --server_ip 129.102.15.12\\\"\""
+					"text" : "set_command \"ssh -t -R 8000:localhost:8000 karchkhadze@reach1.ircam.fr \\\"cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server_CD.py --serverport 7000 --clientport 8000\\\"\""
 				}
 
 			}
@@ -4943,7 +4992,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 42.210010528564453, 652.03765869140625, 50.0, 22.0 ],
-					"text" : "12"
+					"text" : "3"
 				}
 
 			}
@@ -5039,7 +5088,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 377.130615234375, 767.64990234375, 69.277107238769531, 22.0 ],
-					"text" : "859950."
+					"text" : "264600."
 				}
 
 			}
@@ -5183,7 +5232,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 784.5550537109375, 1001.34625244140625, 93.617019653320313, 22.0 ],
-					"text" : "18000."
+					"text" : "4500."
 				}
 
 			}
@@ -5269,7 +5318,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 1828.761962890625, 46.342563629150391, 58.0, 22.0 ],
+					"patching_rect" : [ 2663.761962890625, 56.342563629150391, 58.0, 22.0 ],
 					"text" : "loadbang"
 				}
 
@@ -5336,7 +5385,7 @@
 					"outlettype" : [ "", "int", "", "" ],
 					"parameter_enable" : 0,
 					"patching_rect" : [ 896.891507825851477, 158.926211178302765, 451.478398957252466, 75.835837960243225 ],
-					"text" : "set_command \"ssh -t karchkhadze@reach1.ircam.fr \\\"cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server.py --serverport 7000 --clientport 8000 --server_ip 129.102.15.12\\\"\""
+					"text" : "set_command \"ssh -t -R 8000:localhost:8000 karchkhadze@reach1.ircam.fr \\\"cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server.py --serverport 7000 --clientport 8000\\\"\""
 				}
 
 			}
@@ -5609,7 +5658,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 2,
 					"outlettype" : [ "", "" ],
-					"patching_rect" : [ 1836.327880859375, 98.528335571289063, 67.0, 22.0 ],
+					"patching_rect" : [ 2671.327880859375, 108.528335571289063, 67.0, 22.0 ],
 					"save" : [ "#N", "thispatcher", ";", "#Q", "end", ";" ],
 					"text" : "thispatcher"
 				}
@@ -5966,7 +6015,7 @@
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 1689.309292078018188, 202.195473623275745, 84.0, 22.0 ],
+					"patching_rect" : [ 2524.309326171875, 212.195480346679688, 84.0, 22.0 ],
 					"text" : "s sample_rate"
 				}
 
@@ -6257,7 +6306,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 934.5550537109375, 995.43804931640625, 93.617019653320313, 22.0 ],
-					"text" : "19499.977324"
+					"text" : "5999.977324"
 				}
 
 			}
@@ -6450,14 +6499,14 @@
 					"presentation_rect" : [ 635.30169677734375, 59.947998046875, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_mmin" : -70.0,
-							"parameter_longname" : "live.gain~[7]",
-							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
 							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_unitstyle" : 4,
+							"parameter_mmin" : -70.0,
+							"parameter_longname" : "live.gain~[7]",
+							"parameter_initial_enable" : 1
 						}
 
 					}
@@ -6483,14 +6532,14 @@
 					"presentation_rect" : [ 635.30169677734375, 214.145217895507813, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_mmin" : -70.0,
-							"parameter_longname" : "live.gain~[6]",
-							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
 							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_unitstyle" : 4,
+							"parameter_mmin" : -70.0,
+							"parameter_longname" : "live.gain~[6]",
+							"parameter_initial_enable" : 1
 						}
 
 					}
@@ -6516,14 +6565,14 @@
 					"presentation_rect" : [ 635.30169677734375, 161.538070678710938, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_mmin" : -70.0,
-							"parameter_longname" : "live.gain~[5]",
-							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
 							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_unitstyle" : 4,
+							"parameter_mmin" : -70.0,
+							"parameter_longname" : "live.gain~[5]",
+							"parameter_initial_enable" : 1
 						}
 
 					}
@@ -6565,14 +6614,14 @@
 					"presentation_rect" : [ 635.30169677734375, 108.930908203125, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_mmin" : -70.0,
-							"parameter_longname" : "live.gain~[4]",
-							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
 							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_unitstyle" : 4,
+							"parameter_mmin" : -70.0,
+							"parameter_longname" : "live.gain~[4]",
+							"parameter_initial_enable" : 1
 						}
 
 					}
@@ -6596,8 +6645,8 @@
 						"basictuning" : 440,
 						"followglobaltempo" : 0,
 						"formantcorrection" : 0,
-						"loopend" : [ 21000.0, "ms" ],
-						"loopstart" : [ 15000.0, "ms" ],
+						"loopend" : [ 7500.0, "ms" ],
+						"loopstart" : [ 1500.0, "ms" ],
 						"mode" : "basic",
 						"originallength" : [ 0.0, "ticks" ],
 						"originaltempo" : 120.0,
@@ -7263,14 +7312,14 @@
 					"presentation_rect" : [ 239.05926513671875, 90.447998046875, 46.0, 153.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
-							"parameter_mmin" : -70.0,
-							"parameter_longname" : "live.gain~",
-							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
 							"parameter_initial" : [ -70.0 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_unitstyle" : 4,
+							"parameter_mmin" : -70.0,
+							"parameter_longname" : "live.gain~",
+							"parameter_initial_enable" : 1
 						}
 
 					}
@@ -7286,7 +7335,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 1642.809326171875, 135.027420043945313, 70.0, 22.0 ],
+					"patching_rect" : [ 2477.809326171875, 145.027420043945313, 70.0, 22.0 ],
 					"text" : "loadmess 1"
 				}
 
@@ -7298,7 +7347,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 2,
 					"outlettype" : [ "", "int" ],
-					"patching_rect" : [ 1641.309292078018188, 163.027419400215138, 67.0, 22.0 ],
+					"patching_rect" : [ 2476.309326171875, 173.027420043945313, 67.0, 22.0 ],
 					"text" : "adstatus sr"
 				}
 
@@ -7310,7 +7359,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 1600.0198974609375, 36.81689453125, 78.0, 22.0 ],
+					"patching_rect" : [ 2435.02001953125, 46.81689453125, 78.0, 22.0 ],
 					"text" : "loadmess 11"
 				}
 
@@ -7322,7 +7371,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 2,
 					"outlettype" : [ "", "int" ],
-					"patching_rect" : [ 1636.809292078018188, 106.67606567382812, 85.0, 22.0 ],
+					"patching_rect" : [ 2471.809326171875, 116.676063537597656, 85.0, 22.0 ],
 					"text" : "adstatus sigvs"
 				}
 
@@ -9961,6 +10010,13 @@
 			}
 , 			{
 				"patchline" : 				{
+					"destination" : [ "obj-156", 0 ],
+					"source" : [ "obj-337", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
 					"destination" : [ "obj-332", 0 ],
 					"source" : [ "obj-338", 0 ]
 				}
@@ -10002,6 +10058,13 @@
 					"destination" : [ "obj-430", 0 ],
 					"midpoints" : [ 413.293487548828125, 1770.684211730957031, 960.0, 1770.684211730957031, 960.0, 1566.0, 1036.1485595703125, 1566.0 ],
 					"source" : [ "obj-34", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-337", 0 ],
+					"source" : [ "obj-340", 0 ]
 				}
 
 			}
@@ -10527,6 +10590,13 @@
 			}
 , 			{
 				"patchline" : 				{
+					"destination" : [ "obj-12", 0 ],
+					"source" : [ "obj-54", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
 					"destination" : [ "obj-187", 0 ],
 					"source" : [ "obj-55", 0 ]
 				}
@@ -10894,7 +10964,7 @@
 , 			{
 				"patchline" : 				{
 					"destination" : [ "obj-156", 0 ],
-					"midpoints" : [ 909.83843994140625, 171.0, 1785.0, 171.0, 1785.0, 234.0, 1578.0, 234.0, 1578.0, 336.0, 954.0, 336.0, 954.0, 330.0, 903.65165754556665, 330.0 ],
+					"midpoints" : [ 909.83843994140625, 144.0, 882.0, 144.0, 882.0, 246.0, 906.0, 246.0, 906.0, 330.0, 903.65165754556665, 330.0 ],
 					"source" : [ "obj-97", 0 ]
 				}
 
@@ -10992,14 +11062,14 @@
 			}
  ],
 		"parameters" : 		{
-			"obj-210" : [ "textbutton[1]", "textbutton", 0 ],
-			"obj-302" : [ "textbutton[2]", "textbutton", 0 ],
-			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
 			"obj-173" : [ "live.gain~[6]", "live.gain~", 0 ],
 			"obj-172" : [ "live.gain~[5]", "live.gain~", 0 ],
-			"obj-183" : [ "live.gain~[7]", "live.gain~", 0 ],
-			"obj-158" : [ "live.gain~[4]", "live.gain~", 0 ],
 			"obj-34" : [ "live.gain~", "live.gain~", 0 ],
+			"obj-183" : [ "live.gain~[7]", "live.gain~", 0 ],
+			"obj-210" : [ "textbutton[1]", "textbutton", 0 ],
+			"obj-302" : [ "textbutton[2]", "textbutton", 0 ],
+			"obj-158" : [ "live.gain~[4]", "live.gain~", 0 ],
+			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
 			"parameterbanks" : 			{
 
 			}
@@ -11009,7 +11079,7 @@
 		"dependency_cache" : [ 			{
 				"name" : "instruments.png",
 				"bootpath" : "~/Documents/Max 8/Packages/max-sdk-main/externals",
-				"patcherrelativepath" : ".",
+				"patcherrelativepath" : "../../../../../externals",
 				"type" : "PNG",
 				"implicit" : 1
 			}
@@ -11071,6 +11141,7 @@
 , 			{
 				"name" : "Default M4L-1",
 				"default" : 				{
+					"fontface" : [ 1 ],
 					"fontsize" : [ 11.0 ],
 					"bgfillcolor" : 					{
 						"angle" : 270.0,
@@ -11081,8 +11152,7 @@
 						"type" : "gradient"
 					}
 ,
-					"fontname" : [ "Arial" ],
-					"fontface" : [ 1 ]
+					"fontname" : [ "Arial" ]
 				}
 ,
 				"parentstyle" : "",
@@ -11202,8 +11272,8 @@
 , 			{
 				"name" : "newobjYellow-1",
 				"default" : 				{
-					"fontsize" : [ 12.059008 ],
-					"accentcolor" : [ 0.82517, 0.78181, 0.059545, 1.0 ]
+					"accentcolor" : [ 0.82517, 0.78181, 0.059545, 1.0 ],
+					"fontsize" : [ 12.059008 ]
 				}
 ,
 				"parentstyle" : "",
