@@ -757,15 +757,50 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 	strncpy(x->server_ip, "127.0.0.1", sizeof(x->server_ip) - 1);
 	x->server_ip[sizeof(x->server_ip) - 1] = '\0';
 
+	auto resolve_to_ip = [](const char* hostname, char* ip_out, size_t ip_out_size) {
+		struct addrinfo hints = {}, *res = nullptr;
+		hints.ai_family = AF_INET;
+		hints.ai_socktype = SOCK_DGRAM;
+		if (getaddrinfo(hostname, nullptr, &hints, &res) == 0 && res) {
+			inet_ntop(AF_INET, &((struct sockaddr_in*)res->ai_addr)->sin_addr, ip_out, (socklen_t)ip_out_size);
+			freeaddrinfo(res);
+			return true;
+		}
+		return false;
+	};
+
 	if (char* flag = strstr(x->command_str, "--server_ip")) {
+		// explicit --server_ip provided: parse and resolve it
 		flag += (int)strlen("--server_ip");
 		while (*flag == ' ') flag++;
 		char* end = flag;
-		while (*end && *end != ' ' && *end != '\"') end++;  // stop at space or closing quote
-		size_t ip_len = (size_t)(end - flag);
-		if (ip_len > 0 && ip_len < sizeof(x->server_ip)) {
-			strncpy(x->server_ip, flag, ip_len);
-			x->server_ip[ip_len] = '\0';
+		while (*end && *end != ' ' && *end != '\"') end++;
+		size_t len = (size_t)(end - flag);
+		if (len > 0 && len < sizeof(x->server_ip)) {
+			char hostname[512] = { 0 };
+			strncpy(hostname, flag, len);
+			hostname[len] = '\0';
+			if (!resolve_to_ip(hostname, x->server_ip, sizeof(x->server_ip)))
+				strncpy(x->server_ip, hostname, sizeof(x->server_ip) - 1);
+			x->server_ip[sizeof(x->server_ip) - 1] = '\0';
+		}
+	}
+	else if (char* ssh = strstr(x->command_str, "ssh ")) {
+		// no --server_ip: try to extract hostname from ssh user@host
+		char* at = strchr(ssh, '@');
+		if (at) {
+			at++; // skip '@'
+			char* end = at;
+			while (*end && *end != ' ' && *end != '\"') end++;
+			size_t len = (size_t)(end - at);
+			if (len > 0 && len < 512) {
+				char hostname[512] = { 0 };
+				strncpy(hostname, at, len);
+				hostname[len] = '\0';
+				if (!resolve_to_ip(hostname, x->server_ip, sizeof(x->server_ip)))
+					strncpy(x->server_ip, hostname, sizeof(x->server_ip) - 1);
+				x->server_ip[sizeof(x->server_ip) - 1] = '\0';
+			}
 		}
 	}
 
