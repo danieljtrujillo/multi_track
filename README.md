@@ -53,7 +53,11 @@ https://github.com/karchkha/musical-accompaniment-ldm
 
 ## For Developers — Building from Source
 
-### Requirements
+---
+
+### Building on Windows
+
+#### Requirements
 
 - Windows 10, x64
 - Visual Studio 2022
@@ -63,7 +67,7 @@ https://github.com/karchkha/musical-accompaniment-ldm
   ```
 - oscpack 1.1.0 — download from https://github.com/RossBencina/oscpack and place the folder at `max-sdk-main/oscpack_1_1_0/`
 
-### Step 1 — Build oscpack
+#### Step 1 — Build oscpack
 
 1. Download oscpack 1.1.0 from https://github.com/RossBencina/oscpack
 2. Place it at `max-sdk-main/oscpack_1_1_0/`
@@ -77,7 +81,7 @@ https://github.com/karchkha/musical-accompaniment-ldm
    msbuild "path\to\max-sdk-main\oscpack_1_1_0\build\oscpack.vcxproj" /t:Rebuild /p:Configuration=Release /p:Platform=x64
    ```
 
-### Step 2 — Build the external
+#### Step 2 — Build the external
 
 1. Open `max-sdk-main/build/max-sdk-main.sln` in Visual Studio 2022
 2. Select configuration **Release** and platform **x64**
@@ -89,6 +93,57 @@ max-sdk-main/externals/multi_track.mxe64
 ```
 
 Copy it into `multi_track/externals/` to update the package.
+
+---
+
+### Building on macOS
+
+#### Requirements
+
+- macOS 11 or later (Intel or Apple Silicon)
+- Xcode (with Command Line Tools)
+- CMake — install via Homebrew: `brew install cmake`
+- Max SDK (`max-sdk-main`) with submodules initialized:
+  ```
+  git clone https://github.com/Cycling74/max-sdk.git max-sdk-main
+  cd max-sdk-main
+  git submodule update --init --recursive
+  ```
+- This source folder placed at `max-sdk-main/source/advanced/multi_track/`
+
+#### Step 1 — Build oscpack (universal binary)
+
+```bash
+cd /path/to/max-sdk-main
+git clone https://github.com/RossBencina/oscpack oscpack_1_1_0
+mkdir oscpack_1_1_0/build
+cd oscpack_1_1_0/build
+cmake .. -DCMAKE_OSX_ARCHITECTURES="x86_64;arm64" -DCMAKE_BUILD_TYPE=Release -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+make
+```
+
+This produces `liboscpack.a` in `oscpack_1_1_0/build/`.
+
+#### Step 2 — Generate the Xcode project
+
+```bash
+cd /path/to/max-sdk-main
+mkdir -p build
+cd build
+cmake .. -G Xcode
+```
+
+#### Step 3 — Build the external in Xcode
+
+1. Open `max-sdk-main/build/max-sdk-main.xcodeproj` in Xcode
+2. Go to **Product → Scheme → Manage Schemes** and enable only `multi_track`
+3. Select **Release** configuration
+4. Press **Cmd+B** to build
+
+The compiled external (`multi_track.mxo`) will appear in `max-sdk-main/externals/`.
+Copy it into `multi_track/externals/` to update the package.
+
+> **Note:** The source code currently contains Windows-specific APIs (WinSock, WinHTTP, Windows process management). A macOS port replacing these with POSIX equivalents is in progress.
 
 ---
 

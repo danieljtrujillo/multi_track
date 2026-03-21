@@ -22,12 +22,18 @@ add_library(
 	${PROJECT_SRC}
 )
 
-# Link oscpack and Windows libraries
-target_link_libraries(${PROJECT_NAME} PRIVATE
-	"${CMAKE_CURRENT_SOURCE_DIR}/../../../oscpack_1_1_0/build/$<CONFIG>/oscpack.lib"
-	Ws2_32.lib
-	winmm.lib
-)
+# Link oscpack — platform-specific
+if(WIN32)
+	target_link_libraries(${PROJECT_NAME} PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/../../../oscpack_1_1_0/build/$<CONFIG>/oscpack.lib"
+		Ws2_32.lib
+		winmm.lib
+	)
+elseif(APPLE)
+	target_link_libraries(${PROJECT_NAME} PRIVATE
+		"${CMAKE_CURRENT_SOURCE_DIR}/../../../oscpack_1_1_0/build/oscpack_1_1_0/build/liboscpack.a"
+	)
+endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../../max-sdk-base/script/max-posttarget.cmake)
 

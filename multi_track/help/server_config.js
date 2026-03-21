@@ -10,6 +10,7 @@ var serverport = 7000;
 var clientport = 8000;
 var script = 'server.py';
 var cuda = 0;
+var os = 'windows'; // set via [set os mac] or [set os windows] from the patch
 
 function loaded() {
     is_loading = false;
@@ -33,6 +34,7 @@ function set() {
     else if (key === 'clientport') clientport = val;
     else if (key === 'script')     script     = val;
     else if (key === 'cuda')       cuda       = val;
+    else if (key === 'os')         os         = val;
     if (!is_loading) bang();
 }
 
@@ -49,23 +51,42 @@ function bang() {
     if (parseInt(cuda) === -1) post("server_config: CUDA device -1, running on CPU\n");
 
     var cmd;
-    if (mode === 0) { /// local
+    if (mode === 0) { // local
         post("server_config: 'host' is ignored in local mode\n");
-        cmd = 'cmd.exe /K "cd %USERPROFILE%\\' + dir
-            + ' && set CUDA_VISIBLE_DEVICES=' + cuda_val
-            + ' && conda run --no-capture-output -n ' + conda_env + ' python'
-            + ' ' + script
-            + ' --serverport ' + serverport
-            + ' --clientport ' + clientport
-            + ' --client_ip 127.0.0.1"';
-    } else { /// remote
-        cmd = 'ssh -t -R ' + clientport + ':localhost:' + clientport + ' ' + host
-            + " \"bash -ic 'cd " + dir
-            + ' && export CUDA_VISIBLE_DEVICES=' + cuda_val
-            + ' && conda run --no-capture-output -n ' + conda_env + ' python'
-            + ' ' + script
-            + ' --serverport ' + serverport
-            + " --clientport " + clientport + "\"'";
+        if (os === 'mac') {
+            cmd = 'zsh -ic "cd ~/' + dir
+                + ' && conda run --no-capture-output -n ' + conda_env + ' python'
+                + ' ' + script
+                + ' --serverport ' + serverport
+                + ' --clientport ' + clientport
+                + ' --client_ip 127.0.0.1"';
+        } else { // windows
+            cmd = 'cmd.exe /K "cd %USERPROFILE%\\' + dir
+                + ' && set CUDA_VISIBLE_DEVICES=' + cuda_val
+                + ' && conda run --no-capture-output -n ' + conda_env + ' python'
+                + ' ' + script
+                + ' --serverport ' + serverport
+                + ' --clientport ' + clientport
+                + ' --client_ip 127.0.0.1"';
+        }
+    } else { // remote
+        if (os === 'mac') {
+            cmd = 'ssh -t -R ' + clientport + ':localhost:' + clientport + ' ' + host
+                + " \"bash -ic 'cd " + dir
+                + ' && export CUDA_VISIBLE_DEVICES=' + cuda_val
+                + ' && conda run --no-capture-output -n ' + conda_env + ' python'
+                + ' ' + script
+                + ' --serverport ' + serverport
+                + " --clientport " + clientport + "'\"";
+        } else { // windows
+            cmd = 'ssh -t -R ' + clientport + ':localhost:' + clientport + ' ' + host
+                + " \"bash -ic 'cd " + dir
+                + ' && export CUDA_VISIBLE_DEVICES=' + cuda_val
+                + ' && conda run --no-capture-output -n ' + conda_env + ' python'
+                + ' ' + script
+                + ' --serverport ' + serverport
+                + " --clientport " + clientport + "\"'";
+        }
     }
     outlet(0, cmd);
 }

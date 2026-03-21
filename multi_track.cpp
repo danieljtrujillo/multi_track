@@ -22,38 +22,44 @@
 #include "jit.common.h"
 
 #include <time.h>
+#include <algorithm>
+#include <iostream>
+#include <mutex>
+#include <stdio.h>		/* for dumpping memroy to file */
+#include <thread>
+#include <chrono> // For optional delays
 
-
+#ifdef _WIN32
 #include "shellapi.h"
 #include <windows.h>
-#include <algorithm>
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "Ws2_32.lib")  // Link Winsock library
+#include <tlhelp32.h>
+#include <winhttp.h>
+#pragma comment(lib, "winhttp.lib")
+#else
+// macOS / POSIX
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <unistd.h>
+#include <signal.h>
+#include <sys/wait.h>
+#include <sys/types.h>
+#include <ifaddrs.h>
+#include <sys/time.h>
+#include <sys/stat.h>
+#endif
 
-
-#include <iostream>
 #include "osc/OscOutboundPacketStream.h"
 #include "ip/UdpSocket.h"
 #include <ip/IpEndpointName.h>
 #include "osc/OscReceivedElements.h"
 #include "osc/OscPacketListener.h"
 
-#include <mutex>
-
-
-#include<stdio.h>		/* for dumpping memroy to file */
-
 #include "z_dsp.h"			// required for MSP objects
-
-#include <thread>
-#include <chrono> // For optional delays
-
-#include <winsock2.h>
-#include <ws2tcpip.h>
-#pragma comment(lib, "Ws2_32.lib")  // Link Winsock library
-
-#include <tlhelp32.h>
-
-#include <winhttp.h>
-#pragma comment(lib, "winhttp.lib")
 
 
 
@@ -114,14 +120,16 @@ typedef struct _multi_track {
 
 	int verbose_flag; /* defines if extention will or won't output execution times and other information */
 
+#ifdef _WIN32
 	SHELLEXECUTEINFO lpExecInfo; /* Open .h5 file handler */
+#endif
 
 	/* paralel thereads for osc listening and outputing */
 	t_systhread		listener_thread;
 
 	/* comunication ports with pythin server */
-	int PORT_SENDER; 
-	int PORT_LISTENER; 
+	int PORT_SENDER;
+	int PORT_LISTENER;
 
 	//bool* server_predicted;		/* flag if server has predicted */
 	//bool* server_ready;			/* flag if server is running and ready to receive data */
@@ -131,7 +139,7 @@ typedef struct _multi_track {
 	thread_control* out_tread_control;		/* lock, unlock and notify routine for output thread */
 	thread_control* server_control;			/* lock, unlock and notify routine for server start up thread */
 	thread_control* python_import_control;	/* lock, unlock and notify routine for server's data importing thread */
-	
+
 	/* outlets */
 	void* bass_outlet;     // Outlet for bass buffer
 	void* drums_outlet;    // Outlet for drums buffer
@@ -139,8 +147,17 @@ typedef struct _multi_track {
 	void* piano_outlet;    // Outlet for piano buffer
 
 	int package_size;  // Variable to store the current packet size
+
+#ifdef _WIN32
 	HANDLE server_process = NULL; // Store the server process handle
 	HANDLE server_job;  // Add this field
+#else
+	pid_t server_pid = 0;   // macOS: child process PID
+	pid_t server_pgid = 0;  // macOS: child process group ID
+	int terminal_window_id = 0; // macOS: Terminal.app window ID for clean close
+	int server_osc_port = 7000; // macOS: server port, used to kill by port on stop
+#endif
+
 	char command_str[1024]; // Add this field to store the command
 
 	char client_ip[512] = { 0 };
@@ -337,6 +354,7 @@ void multi_track_free(t_multi_track* x) {
 	post("Freeing multi_track object and stopping processes...");
 
 	/************** Stop Python server if running ****************/
+#ifdef _WIN32
 	if (x->server_process) {
 		DWORD exit_code;
 		if (GetExitCodeProcess(x->server_process, &exit_code) && exit_code == STILL_ACTIVE) {
@@ -357,6 +375,16 @@ void multi_track_free(t_multi_track* x) {
 			post("Python server stopped.");
 		}
 	}
+#else
+	if (x->server_pgid > 0) {
+		post("Stopping Python server...");
+		killpg(x->server_pgid, SIGTERM);
+		waitpid(x->server_pid, NULL, WNOHANG);
+		x->server_pid = 0;
+		x->server_pgid = 0;
+		post("Python server stopped.");
+	}
+#endif
 
 	///************** Stop listener thread safely ****************/
 	//if (x->listener_thread) {
@@ -815,20 +843,20 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 		return;
 	}
 
-	// 5) Find the inner quoted remote command: inject before the LAST quote
+	// 5) Find the right injection point and insert --client_ip
+	// For local commands:  zsh -ic "... --clientport N"       → inject before last "
+	// For SSH commands:    ssh ... "bash -ic '... --clientport N'"  → inject before last '
+	// so the arg ends up inside the python command, not outside it.
 	char* last_quote = strrchr(x->command_str, '\"');
 	if (last_quote) {
-		// find matching opening quote to scope the block
-		char* open_quote = NULL;
-		for (char* p = last_quote - 1; p >= x->command_str; --p) {
-			if (*p == '\"') { open_quote = p; break; }
-			if (p == x->command_str) break;
-		}
-
-		// If we have a well-formed " ... " block, check if --client_ip already inside (paranoia)
-		if (open_quote && strstr(open_quote, "--client_ip") && strstr(open_quote, "--client_ip") < last_quote) {
-			post("Command set to: %s", x->command_str);
-			return;
+		// Look for a single-quote between the second-to-last " and last_quote
+		// (i.e. inside the outer double-quoted SSH block, after bash -ic ')
+		char* inject_pos = last_quote; // default: before last "
+		char* p = last_quote - 1;
+		while (p > x->command_str) {
+			if (*p == '\'') { inject_pos = p; break; } // found closing ' — inject here
+			if (*p == '\"') break; // hit another ", stop looking
+			--p;
 		}
 
 		// Build injection
@@ -838,17 +866,15 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 		size_t inject_len = strlen(inject);
 		size_t cmd_len = strlen(x->command_str);
 
-		// Capacity check
 		if (cmd_len + inject_len >= sizeof(x->command_str)) {
 			post("Warning: command too long to inject --client_ip; skipping injection.");
 			post("Command set to: %s", x->command_str);
 			return;
 		}
 
-		// Insert IN-PLACE just before last_quote
-		size_t tail_len = cmd_len - (size_t)(last_quote - x->command_str) + 1; // include '\0'
-		memmove(last_quote + inject_len, last_quote, tail_len);
-		memcpy(last_quote, inject, inject_len);
+		size_t tail_len = cmd_len - (size_t)(inject_pos - x->command_str) + 1;
+		memmove(inject_pos + inject_len, inject_pos, tail_len);
+		memcpy(inject_pos, inject, inject_len);
 
 		post("Command set to: %s", x->command_str);
 		return;
@@ -876,10 +902,10 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 
 
 void get_public_ip(char* ip_buffer, size_t buffer_size) {
-	// defaults
 	if (!ip_buffer || buffer_size == 0) return;
 	ip_buffer[0] = '\0';
 
+#ifdef _WIN32
 	// ---------- 1) Get outbound interface IP (local/NAT-side) ----------
 	char outbound_ip[64] = { 0 };
 	{
@@ -917,7 +943,6 @@ void get_public_ip(char* ip_buffer, size_t buffer_size) {
 			HINTERNET hConnect = WinHttpConnect(hSession, L"api.ipify.org",
 				INTERNET_DEFAULT_HTTPS_PORT, 0);
 			if (hConnect) {
-				// root path returns plain text IP
 				HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"GET", L"/",
 					NULL, WINHTTP_NO_REFERER,
 					WINHTTP_DEFAULT_ACCEPT_TYPES,
@@ -938,7 +963,6 @@ void get_public_ip(char* ip_buffer, size_t buffer_size) {
 					} while (avail > 0);
 
 					if (!body.empty()) {
-						// Trim whitespace/newlines just in case
 						while (!body.empty() && (body.back() == '\r' || body.back() == '\n' || body.back() == ' ' || body.back() == '\t'))
 							body.pop_back();
 						strncpy(public_ip, body.c_str(), sizeof(public_ip) - 1);
@@ -962,12 +986,66 @@ void get_public_ip(char* ip_buffer, size_t buffer_size) {
 	}
 	else {
 		post("Public (NAT) IP: (failed to fetch via HTTPS)");
-		// fall back to outbound if we have it
 		if (outbound_ip[0]) {
 			strncpy(ip_buffer, outbound_ip, buffer_size - 1);
 			ip_buffer[buffer_size - 1] = '\0';
 		}
 	}
+
+#else
+	// ---------- macOS: 1) Get outbound interface IP via connect trick ----------
+	char outbound_ip[64] = { 0 };
+	{
+		int sock = socket(AF_INET, SOCK_DGRAM, 0);
+		if (sock >= 0) {
+			struct sockaddr_in server_addr = {};
+			server_addr.sin_family = AF_INET;
+			server_addr.sin_port = htons(80);
+			inet_pton(AF_INET, "8.8.8.8", &server_addr.sin_addr);
+
+			if (connect(sock, (struct sockaddr*)&server_addr, sizeof(server_addr)) == 0) {
+				struct sockaddr_in local_addr = {};
+				socklen_t addr_len = sizeof(local_addr);
+				if (getsockname(sock, (struct sockaddr*)&local_addr, &addr_len) == 0) {
+					inet_ntop(AF_INET, &local_addr.sin_addr, outbound_ip, sizeof(outbound_ip));
+				}
+			}
+			close(sock);
+		}
+	}
+
+	// ---------- macOS: 2) Fetch public IP via curl ----------
+	char public_ip[64] = { 0 };
+	bool got_public = false;
+	{
+		FILE* fp = popen("curl -s --max-time 5 https://api.ipify.org", "r");
+		if (fp) {
+			if (fgets(public_ip, sizeof(public_ip), fp)) {
+				// trim whitespace
+				size_t len = strlen(public_ip);
+				while (len > 0 && (public_ip[len-1] == '\r' || public_ip[len-1] == '\n' || public_ip[len-1] == ' '))
+					public_ip[--len] = '\0';
+				if (len > 0) got_public = true;
+			}
+			pclose(fp);
+		}
+	}
+
+	// ---------- 3) Log both & choose return value ----------
+	post("Outbound interface IP: %s", outbound_ip[0] ? outbound_ip : "(unknown)");
+	if (got_public) {
+		post("Public (NAT) IP: %s", public_ip);
+		strncpy(ip_buffer, public_ip, buffer_size - 1);
+		ip_buffer[buffer_size - 1] = '\0';
+	}
+	else {
+		post("Public (NAT) IP: (failed to fetch via curl)");
+		if (outbound_ip[0]) {
+			strncpy(ip_buffer, outbound_ip, buffer_size - 1);
+			ip_buffer[buffer_size - 1] = '\0';
+		}
+	}
+#endif
 }
 
 
@@ -1031,7 +1109,8 @@ void multi_track_load_model(t_multi_track* x) {
 /****************************************************/
 
 
-// Function to terminate a process and its children
+#ifdef _WIN32
+// Function to terminate a process and its children (Windows only)
 void terminate_process_tree(DWORD process_id) {
 	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (hSnapshot == INVALID_HANDLE_VALUE) {
@@ -1060,10 +1139,19 @@ void terminate_process_tree(DWORD process_id) {
 
 	CloseHandle(hSnapshot);
 }
+#else
+// macOS: terminate process group (covers all child processes)
+void terminate_process_tree(pid_t pgid) {
+	if (pgid > 0)
+		killpg(pgid, SIGTERM);
+}
+#endif
 
 
 void multi_track_server(t_multi_track* x, long command) {
 	if (command == 1) { // Start the server
+
+#ifdef _WIN32
 		if (x->server_process != NULL) {
 			DWORD exit_code;
 			if (GetExitCodeProcess(x->server_process, &exit_code) && exit_code == STILL_ACTIVE) {
@@ -1071,14 +1159,19 @@ void multi_track_server(t_multi_track* x, long command) {
 				return;
 			}
 		}
+#else
+		if (x->server_pid > 0 && kill(x->server_pid, 0) == 0) {
+			post("Server is already running.");
+			return;
+		}
+#endif
 
-		// Check if x->command_str is set
 		if (x->command_str[0] == '\0') {
 			post("Error: No command defined. Use 'set_command' to define the server command.");
 			return;
 		}
 
-		// Use the stored command
+#ifdef _WIN32
 		char command_str[512];
 		snprintf(command_str, sizeof(command_str), "cmd.exe /C %s", x->command_str);
 
@@ -1088,25 +1181,21 @@ void multi_track_server(t_multi_track* x, long command) {
 		si.cb = sizeof(si);
 		ZeroMemory(&pi, sizeof(pi));
 
-		// Show the terminal window
 		si.dwFlags = STARTF_USESHOWWINDOW;
-		si.wShowWindow = SW_SHOWNORMAL;  // Show the terminal window
+		si.wShowWindow = SW_SHOWNORMAL;
 
-		// Create a job object to manage the process tree
 		HANDLE hJob = CreateJobObject(NULL, NULL);
 		if (hJob == NULL) {
 			post("Failed to create job object.");
 			return;
 		}
 
-		// Start the process with a visible terminal
 		if (!CreateProcess(NULL, command_str, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
 			post("Failed to start the server.");
 			CloseHandle(hJob);
 			return;
 		}
 
-		// Assign the process to the job object
 		if (!AssignProcessToJobObject(hJob, pi.hProcess)) {
 			post("Failed to assign process to job object.");
 			CloseHandle(hJob);
@@ -1116,36 +1205,85 @@ void multi_track_server(t_multi_track* x, long command) {
 			return;
 		}
 
-		// Store process and job handles
 		x->server_process = pi.hProcess;
 		x->server_job = hJob;
 		CloseHandle(pi.hThread);
 
-		// Set flag to auto-load model when server signals ready
-		x->auto_load_model_on_ready = true;
+#else
+		// macOS: write command to a temp shell script, then use osascript to
+		// open it in Terminal.app and capture the window ID for clean shutdown.
 
+		// Parse --serverport from command so stop can kill by port
+		x->server_osc_port = 7000; // default
+		if (char* pf = strstr(x->command_str, "--serverport")) {
+			pf += strlen("--serverport");
+			while (*pf == ' ') pf++;
+			x->server_osc_port = atoi(pf);
+		}
+
+		// Write the server command to a temp shell script
+		const char* sh_path = "/tmp/multi_track_server.sh";
+		FILE* fp = fopen(sh_path, "w");
+		if (fp) {
+			fprintf(fp, "#!/bin/zsh\n%s\n", x->command_str);
+			fclose(fp);
+			chmod(sh_path, 0755);
+		} else {
+			post("Failed to write server launch script.");
+			return;
+		}
+
+		// Write AppleScript to open the script in Terminal and return window ID
+		const char* scpt_path = "/tmp/multi_track_open.scpt";
+		FILE* scpt = fopen(scpt_path, "w");
+		if (scpt) {
+			fprintf(scpt, "tell application \"Terminal\"\n");
+			fprintf(scpt, "  set newTab to do script \"%s\"\n", sh_path);
+			fprintf(scpt, "  activate\n");
+			fprintf(scpt, "  set winID to id of window 1\n");
+			fprintf(scpt, "end tell\n");
+			fprintf(scpt, "return winID\n");
+			fclose(scpt);
+		} else {
+			post("Failed to write AppleScript.");
+			return;
+		}
+
+		// Run osascript and capture the Terminal window ID
+		char popen_cmd[256];
+		snprintf(popen_cmd, sizeof(popen_cmd), "osascript %s", scpt_path);
+		FILE* pipe = popen(popen_cmd, "r");
+		if (pipe) {
+			int win_id = 0;
+			fscanf(pipe, "%d", &win_id);
+			pclose(pipe);
+			x->terminal_window_id = win_id;
+			post("Server terminal window ID: %d", win_id);
+		} else {
+			post("Failed to launch Terminal via osascript.");
+			return;
+		}
+#endif
+
+		x->auto_load_model_on_ready = true;
 		post("Server started. Waiting for server ready signal...");
 	}
 	else if (command == 0) { // Stop the server
+
+#ifdef _WIN32
 		if (x->server_process) {
 			DWORD exit_code;
 			if (GetExitCodeProcess(x->server_process, &exit_code)) {
 				if (exit_code == STILL_ACTIVE) {
 					post("Stopping the server...");
-
-					// Terminate the entire process tree using the job object
 					if (x->server_job != NULL) {
-						if (!TerminateJobObject(x->server_job, 0)) {
+						if (!TerminateJobObject(x->server_job, 0))
 							post("Failed to terminate job object.");
-						}
 						CloseHandle(x->server_job);
 						x->server_job = NULL;
 					}
-
-					// Close the process handle
 					CloseHandle(x->server_process);
 					x->server_process = NULL;
-					//*x->server_ready = false;
 					post("Server stopped.");
 				}
 				else {
@@ -1160,6 +1298,30 @@ void multi_track_server(t_multi_track* x, long command) {
 		else {
 			post("No active server process found.");
 		}
+#else
+		post("Stopping the server...");
+		// 1. Kill server process by port (reliable regardless of process hierarchy)
+		char kill_cmd[256];
+		snprintf(kill_cmd, sizeof(kill_cmd),
+			"lsof -ti :%d | xargs kill -TERM 2>/dev/null; "
+			"sleep 0.5; "
+			"lsof -ti :%d | xargs kill -KILL 2>/dev/null; true",
+			x->server_osc_port, x->server_osc_port);
+		system(kill_cmd);
+
+		// 2. Close the Terminal window by ID — no running process so no prompt
+		if (x->terminal_window_id != 0) {
+			char close_cmd[256];
+			snprintf(close_cmd, sizeof(close_cmd),
+				"osascript -e 'tell application \"Terminal\" to close (windows whose id is %d)'",
+				x->terminal_window_id);
+			system(close_cmd);
+			x->terminal_window_id = 0;
+		}
+		x->server_pid = 0;
+		x->server_pgid = 0;
+		post("Server stopped.");
+#endif
 	}
 }
 
@@ -1170,12 +1332,16 @@ void multi_track_server(t_multi_track* x, long command) {
 
 void timestamp()     /*********this is used to track timing of data flow *****/
 {
-
+#ifdef _WIN32
 	SYSTEMTIME t;
-	GetSystemTime(&t); // or GetLocalTime(&t)
-	post("%02d:%02d.%4d\n",
-		t.wMinute, t.wSecond, t.wMilliseconds);
-
+	GetSystemTime(&t);
+	post("%02d:%02d.%4d\n", t.wMinute, t.wSecond, t.wMilliseconds);
+#else
+	struct timeval tv;
+	gettimeofday(&tv, NULL);
+	struct tm* tm_info = gmtime(&tv.tv_sec);
+	post("%02d:%02d.%04d\n", tm_info->tm_min, tm_info->tm_sec, (int)(tv.tv_usec / 1000));
+#endif
 }
 /**********************************************************************/
 
@@ -1428,7 +1594,7 @@ public:
 				double round_trip_ms = std::chrono::duration<double, std::milli>(t_received - *packet_test_start_time).count();
 
 				osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
-				int received_size;
+				osc::int32 received_size;
 				args >> received_size;
 
 				// Allocate a C-style array dynamically
@@ -1533,7 +1699,11 @@ public:
 
 class CustomUdpListener {
 private:
+#ifdef _WIN32
 	SOCKET sock_fd;
+#else
+	int sock_fd;
+#endif
 	char buffer[MAX_OSC_PACKET_SIZE];
 	osc::OscPacketListener* packetListener;
 	sockaddr_in serverAddr;
@@ -1541,55 +1711,78 @@ private:
 public:
 	CustomUdpListener(int port, osc::OscPacketListener* listener)
 		: packetListener(listener) {
-		// Initialize Winsock
-		WSADATA wsaData;
-		if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-			throw std::runtime_error("WSAStartup failed");
-		}
 
-		// Create the socket
+#ifdef _WIN32
+		WSADATA wsaData;
+		if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
+			throw std::runtime_error("WSAStartup failed");
+#endif
+
 		sock_fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+
+#ifdef _WIN32
 		if (sock_fd == INVALID_SOCKET) {
 			WSACleanup();
 			throw std::runtime_error("Socket creation failed");
 		}
+#else
+		if (sock_fd < 0)
+			throw std::runtime_error("Socket creation failed");
+#endif
 
-		// Set the receive buffer size
 		int buffer_size = MAX_OSC_PACKET_SIZE;
+#ifdef _WIN32
 		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char*)&buffer_size, sizeof(buffer_size)) == SOCKET_ERROR) {
 			closesocket(sock_fd);
 			WSACleanup();
 			throw std::runtime_error("Failed to set socket buffer size");
 		}
+#else
+		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, &buffer_size, sizeof(buffer_size)) < 0) {
+			close(sock_fd);
+			throw std::runtime_error("Failed to set socket buffer size");
+		}
+#endif
 
-		// Bind the socket
 		memset(&serverAddr, 0, sizeof(serverAddr));
 		serverAddr.sin_family = AF_INET;
 		serverAddr.sin_addr.s_addr = INADDR_ANY;
 		serverAddr.sin_port = htons(port);
 
+#ifdef _WIN32
 		if (bind(sock_fd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR) {
 			closesocket(sock_fd);
 			WSACleanup();
 			throw std::runtime_error("Failed to bind socket");
 		}
+#else
+		if (bind(sock_fd, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) < 0) {
+			close(sock_fd);
+			throw std::runtime_error("Failed to bind socket");
+		}
+#endif
 	}
 
 	~CustomUdpListener() {
+#ifdef _WIN32
 		closesocket(sock_fd);
 		WSACleanup();
+#else
+		close(sock_fd);
+#endif
 	}
 
 	void run() {
 		while (true) {
 			sockaddr_in clientAddr;
+#ifdef _WIN32
 			int clientAddrLen = sizeof(clientAddr);
-
-			// Receive the data
+#else
+			socklen_t clientAddrLen = sizeof(clientAddr);
+#endif
 			int receivedBytes = recvfrom(sock_fd, buffer, MAX_OSC_PACKET_SIZE, 0, (struct sockaddr*)&clientAddr, &clientAddrLen);
 			if (receivedBytes > 0) {
 				try {
-					// Pass the raw packet data to ProcessPacket
 					packetListener->ProcessPacket(buffer, receivedBytes, IpEndpointName(clientAddr.sin_addr.s_addr, ntohs(clientAddr.sin_port)));
 				}
 				catch (const osc::Exception& e) {
