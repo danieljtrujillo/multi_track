@@ -85,7 +85,7 @@ function bang() {
                 + ' && conda run --no-capture-output -n ' + conda_env + ' python'
                 + ' ' + script
                 + ' --serverport ' + serverport
-                + " --clientport " + clientport + "\"'";
+                + " --clientport " + clientport + "'\"";
         }
     }
     outlet(0, cmd);
