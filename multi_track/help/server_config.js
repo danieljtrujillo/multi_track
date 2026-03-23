@@ -71,7 +71,7 @@ function bang() {
         }
     } else { // remote
         if (os === 'mac') {
-            cmd = 'ssh -t -R ' + clientport + ':localhost:' + clientport + ' ' + host
+            cmd = 'ssh -t ' + ' ' + host
                 + " \"bash -ic 'cd " + dir
                 + ' && export CUDA_VISIBLE_DEVICES=' + cuda_val
                 + ' && conda run --no-capture-output -n ' + conda_env + ' python'
@@ -79,7 +79,7 @@ function bang() {
                 + ' --serverport ' + serverport
                 + " --clientport " + clientport + "'\"";
         } else { // windows
-            cmd = 'ssh -t -R ' + clientport + ':localhost:' + clientport + ' ' + host
+            cmd = 'ssh -t ' + ' ' + host
                 + " \"bash -ic 'cd " + dir
                 + ' && export CUDA_VISIBLE_DEVICES=' + cuda_val
                 + ' && conda run --no-capture-output -n ' + conda_env + ' python'

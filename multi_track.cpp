@@ -25,6 +25,7 @@
 #include <algorithm>
 #include <iostream>
 #include <mutex>
+#include <vector>
 #include <stdio.h>		/* for dumpping memroy to file */
 #include <thread>
 #include <chrono> // For optional delays
@@ -119,6 +120,7 @@ typedef struct _multi_track {
 	//char filename[MAX_PATH_CHARS]; /* Keras Network name saved as .h5 file */
 
 	int verbose_flag; /* defines if extention will or won't output execution times and other information */
+	int batch_id;     /* incremented each jit_matrix call so server can detect new batches */
 
 #ifdef _WIN32
 	SHELLEXECUTEINFO lpExecInfo; /* Open .h5 file handler */
@@ -195,7 +197,7 @@ void		multi_track_OSC_load_model(t_multi_track* x);
 void		send_acknowledgment(t_multi_track* x);
 
 // data sending
-void		send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size);
+void		send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size, int total_expected_chunks, int batch_id);
 
 void		* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]);
 void		multi_track_OSC_listen_thread(t_multi_track* x);
@@ -303,6 +305,7 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		//memset(x->filename, 0, MAX_PATH_CHARS); /* emptying network name variable for the begining */
 
 		x->verbose_flag = 0;
+		x->batch_id = 0;
 
 		// Dynamically allocate the indices
 		x->bass_index = new int(0);
@@ -483,11 +486,20 @@ void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* ar
 	// Create threads for sending only non-predicted instruments
 	std::thread* threads[4] = { nullptr };
 
+	int num_active = 0;
+	for (int i = 0; i < 4; i++) {
+		if (x->read_flag[i] == 1) num_active++;
+	}
+	int num_samples_per_plane = info.dim[0] * info.dim[1];
+	int num_chunks_per_plane = (num_samples_per_plane + (int)x->package_size - 1) / (int)x->package_size;
+	int total_expected_chunks = num_active * num_chunks_per_plane;
+	int batch_id = ++x->batch_id;
+
 	for (int i = 0; i < 4; i++) {
 		if (x->read_flag[i] == 1) {  // Send only if read falag is 1
 			threads[i] = new std::thread(send_matrix_plane, matrix_data, i, info.dim[0], info.dim[1],
 				info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER,
-				plane_tags[i], x->package_size);
+				plane_tags[i], x->package_size, total_expected_chunks, batch_id);
 		}
 		//else {
 		//	post("Skipping %s (predicted by model)", plane_tags[i]);
@@ -521,8 +533,7 @@ void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* ar
 	*x->guitar_index = 0;
 	*x->piano_index = 0;
 
-	// Send triger to start prediction process
-	multi_track_OSC_time_to_predict_sender(x);
+	// Python self-triggers prediction when it has received all expected chunks
 }
 
 
@@ -1356,12 +1367,10 @@ void timestamp()     /*********this is used to track timing of data flow *****/
 
 /* function for data sending */
 
-void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size) {
+void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size, int total_expected_chunks, int batch_id) {
 	UdpTransmitSocket transmitSocket(IpEndpointName(address, port));
 	char osc_buffer[OUTPUT_BUFFER_SIZE];
 
-	// Divide the plane into chunks
-	//int package_size = package_size; // 10240; // Maximum floats per OSC message
 	int num_samples = dim0 * dim1; // Total samples in the plane
 	int num_chunks = (num_samples + package_size - 1) / package_size; // Round up
 
@@ -1371,7 +1380,9 @@ void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long 
 		p << osc::BeginMessage(tag);
 
 		int start_index = chunk * package_size;
+		p << batch_id;
 		p << start_index;
+		p << total_expected_chunks;
 		int end_index = (start_index + package_size < num_samples) ? start_index + package_size : num_samples;
 
 		for (int i = start_index; i < end_index; i++) {
@@ -1387,7 +1398,7 @@ void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long 
 		transmitSocket.Send(p.Data(), p.Size());
 
 		// Optional: Add a small delay to avoid overwhelming the receiver
-		std::this_thread::sleep_for(std::chrono::milliseconds(20));
+		// std::this_thread::sleep_for(std::chrono::milliseconds(1));
 	}
 }
 
@@ -1480,6 +1491,17 @@ public:
 
 	//int* calculated_samples;
 
+	// Chunk reassembly — buffer incoming chunks until all total_chunks arrive, then output in order
+	struct StemReassembly {
+		std::vector<std::vector<float>> chunks;
+		int expected = 0;
+		int received = 0;
+		int watchdog_gen = 0;  // incremented on reset; stale watchdogs self-cancel
+		std::chrono::high_resolution_clock::time_point first_chunk_time;
+	};
+	StemReassembly reassembly[4];  // [0]=bass [1]=drums [2]=guitar [3]=piano
+	std::mutex reassembly_mutex;
+
 	std::chrono::high_resolution_clock::time_point* packet_test_start_time;  // Pointer to start time
 	std::chrono::high_resolution_clock::time_point* data_import_start_time;  // Pointer to data import start time
 	int* verbose_flag;  // Pointer to verbose flag
@@ -1566,25 +1588,14 @@ public:
 				out_tread_control->unlock();
 
 				if (server_predicted) {
-					// Reset all instrument indices
-					*bass_index = 0;
-					*drums_index = 0;
-					*guitar_index = 0;
-					*piano_index = 0;
-
-					// Calculate total processing time
+					// /server_predicted is timing-only — completion is now driven by reassembly
 					auto receive_end_time = std::chrono::high_resolution_clock::now();
 					double total_time_ms = std::chrono::duration<double, std::milli>(receive_end_time - *data_import_start_time).count();
-
 					if (*verbose_flag) {
 						post("========================================");
-						post("Data receive completed");
-						post("Total processing time: %.3f ms", total_time_ms);
+						post("/server_predicted received (%.3f ms since import)", total_time_ms);
 						post("========================================");
 					}
-
-					// Notify waiting processes
-					out_tread_control->notify();
 				}
 			}
 
@@ -1627,62 +1638,131 @@ public:
 				delete[] received_values;
 			}
 
-			/* here comes prediction data in chunks of 10240 */
+			/* here comes prediction data in chunks — reassemble then output in order */
 			// ##################################################################
-			// Handle data messages for "/bass", "/drums", "/guitar", "/piano"
+			int stem_idx = -1;
 			void* target_outlet = nullptr;
 			int* current_index = nullptr;
 
-			if (std::strcmp(m.AddressPattern(), "/bass") == 0) {
-				target_outlet = bass_outlet;
-				current_index = bass_index;
-			}
-			else if (std::strcmp(m.AddressPattern(), "/drums") == 0) {
-				target_outlet = drums_outlet;
-				current_index = drums_index;
-			}
-			else if (std::strcmp(m.AddressPattern(), "/guitar") == 0) {
-				target_outlet = guitar_outlet;
-				current_index = guitar_index;
-			}
-			else if (std::strcmp(m.AddressPattern(), "/piano") == 0) {
-				target_outlet = piano_outlet;
-				current_index = piano_index;
-			}
+			if      (std::strcmp(m.AddressPattern(), "/bass")   == 0) { stem_idx = 0; target_outlet = bass_outlet;   current_index = bass_index; }
+			else if (std::strcmp(m.AddressPattern(), "/drums")  == 0) { stem_idx = 1; target_outlet = drums_outlet;  current_index = drums_index; }
+			else if (std::strcmp(m.AddressPattern(), "/guitar") == 0) { stem_idx = 2; target_outlet = guitar_outlet; current_index = guitar_index; }
+			else if (std::strcmp(m.AddressPattern(), "/piano")  == 0) { stem_idx = 3; target_outlet = piano_outlet;  current_index = piano_index; }
 			else {
-				//post("Unknown address pattern: %s", m.AddressPattern());
 				return;
 			}
 
 			osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+			osc::int32 chunk_idx, total_chunks;
+			args >> chunk_idx >> total_chunks;
 
-			// Process the OSC message data
-			t_atom out_atom[2]; // Pair: index and value
+			// Collect floats from this chunk
+			std::vector<float> chunk_data;
 			float value;
-
 			while (!args.Eos()) {
 				args >> value;
-
-				//// Check if the current index exceeds the maximum limit
-				//if (*current_index + 1 >= *calculated_samples) {
-				//	post("Reached maximum samples for %s.", m.AddressPattern());
-				//	post(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>receive ended"); timestamp();
-				//	*current_index = 0;
-				//	break;
-				//}
-
-				// Set the index and value to atoms
-				atom_setlong(&out_atom[0], *current_index + 1); // 1-based index
-				atom_setfloat(&out_atom[1], value);
-
-				// Output to the target outlet
-				outlet_list(target_outlet, 0L, 2, out_atom);
-				//outlet_anything(target_outlet, out_atom, 0, NIL);
-
-				// Increment the index
-				(*current_index)++;
+				chunk_data.push_back(value);
 			}
 
+			// Store chunk; check if all have arrived
+			std::vector<std::vector<float>> chunks_to_output;
+			bool spawn_watchdog = false;
+			double watchdog_timeout_ms = 500.0;  // fallback before we have 2 samples
+			int watchdog_gen = -1;
+			{
+				std::lock_guard<std::mutex> lock(reassembly_mutex);
+				auto& r = reassembly[stem_idx];
+				if (chunk_idx == 0 || (int)r.chunks.size() != total_chunks) {
+					// New transfer — reset reassembly state
+					r.chunks.assign(total_chunks, {});
+					r.expected = total_chunks;
+					r.received = 0;
+					r.first_chunk_time = std::chrono::high_resolution_clock::now();
+				}
+				if (chunk_idx < (int)r.chunks.size() && r.chunks[chunk_idx].empty()) {
+					r.chunks[chunk_idx] = std::move(chunk_data);
+					r.received++;
+				}
+				if (r.received >= r.expected) {
+					chunks_to_output = std::move(r.chunks);
+					r.chunks.clear();
+					r.received = 0;
+					post("All %d chunks received for %s — outputting", total_chunks, m.AddressPattern());
+				} else {
+					// Reset watchdog on every chunk — same adaptive pattern as Python server:
+					// timeout = observed avg inter-chunk interval × 5
+					r.watchdog_gen++;  // cancels any previous watchdog
+					if (r.received > 1) {
+						auto now = std::chrono::high_resolution_clock::now();
+						double span_ms = std::chrono::duration<double, std::milli>(now - r.first_chunk_time).count();
+						watchdog_timeout_ms = (span_ms / (r.received - 1)) * 5.0;
+					}
+					watchdog_gen = r.watchdog_gen;
+					spawn_watchdog = true;
+				}
+			}
+
+			// Spawn one watchdog per transfer (on first chunk only)
+			if (spawn_watchdog) {
+				auto* listener = this;
+				std::thread([listener, stem_idx, watchdog_gen, watchdog_timeout_ms,
+				             target_outlet, current_index]() {
+					std::this_thread::sleep_for(
+						std::chrono::duration<double, std::milli>(watchdog_timeout_ms));
+					std::vector<std::vector<float>> flush_chunks;
+					{
+						std::lock_guard<std::mutex> lock(listener->reassembly_mutex);
+						auto& r = listener->reassembly[stem_idx];
+						if (r.watchdog_gen != watchdog_gen || r.received == 0) return;
+						post("WARNING: watchdog fired — missing %d/%d chunks, flushing with zeros",
+						     r.expected - r.received, r.expected);
+						flush_chunks = std::move(r.chunks);
+						r.chunks.clear();
+						r.received = 0;
+					}
+					auto t_start = std::chrono::high_resolution_clock::now();
+					post("--- Flush output started ---");
+					t_atom out_atom[2];
+					for (auto& chunk : flush_chunks) {
+						int n = chunk.empty() ? 1024 : (int)chunk.size();
+						for (int k = 0; k < n; k++) {
+							atom_setlong(&out_atom[0], *current_index + 1);
+							atom_setfloat(&out_atom[1], chunk.empty() ? 0.0f : chunk[k]);
+							outlet_list(target_outlet, 0L, 2, out_atom);
+							(*current_index)++;
+						}
+					}
+					*current_index = 0;
+					double out_ms = std::chrono::duration<double, std::milli>(
+						std::chrono::high_resolution_clock::now() - t_start).count();
+					post("--- Flush output done (%.1f ms) — signalling completion ---", out_ms);
+					listener->out_tread_control->notify();
+				}).detach();
+			}
+
+			// Output all chunks in order once complete
+			if (!chunks_to_output.empty()) {
+				auto t_start = std::chrono::high_resolution_clock::now();
+				post("--- Output started ---");
+				t_atom out_atom[2];
+				for (auto& chunk : chunks_to_output) {
+					for (float v : chunk) {
+						atom_setlong(&out_atom[0], *current_index + 1);  // 1-based index
+						atom_setfloat(&out_atom[1], v);
+						outlet_list(target_outlet, 0L, 2, out_atom);
+						(*current_index)++;
+					}
+				}
+				*current_index = 0;
+				double out_ms = std::chrono::duration<double, std::milli>(
+					std::chrono::high_resolution_clock::now() - t_start).count();
+				auto total_ms = std::chrono::duration<double, std::milli>(
+					std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
+				post("========================================");
+				post("Output done (%.1f ms) — total cycle: %.1f ms", out_ms, total_ms);
+				post("========================================");
+				out_tread_control->notify();
+			}
 
 			// ##################################################################
 
@@ -1730,7 +1810,7 @@ public:
 			throw std::runtime_error("Socket creation failed");
 #endif
 
-		int buffer_size = MAX_OSC_PACKET_SIZE;
+		int buffer_size = 4 * 1024 * 1024;  // 4MB — same as Python server, handles burst of all chunks
 #ifdef _WIN32
 		if (setsockopt(sock_fd, SOL_SOCKET, SO_RCVBUF, (const char*)&buffer_size, sizeof(buffer_size)) == SOCKET_ERROR) {
 			closesocket(sock_fd);
