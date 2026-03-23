@@ -108,10 +108,10 @@ typedef struct _multi_track {
 	double pr_win_mul;
 
 	// Per-stem write indices, updated as predicted data is received
-	int* bass_index;
-	int* drums_index;
-	int* guitar_index;
-	int* piano_index;
+	int bass_index;
+	int drums_index;
+	int guitar_index;
+	int piano_index;
 
 	int verbose_flag;  // 1 = print timing and debug info to Max console
 	int batch_id;      // Incremented on each jit_matrix call so server can detect new batches
@@ -266,10 +266,10 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		x->verbose_flag = 0;
 		x->batch_id = 0;
 
-		x->bass_index   = new int(0);
-		x->drums_index  = new int(0);
-		x->guitar_index = new int(0);
-		x->piano_index  = new int(0);
+		x->bass_index   = 0;
+		x->drums_index  = 0;
+		x->guitar_index = 0;
+		x->piano_index  = 0;
 
 		x->out_tread_control    = new thread_control;
 		x->server_control       = new thread_control;
@@ -338,11 +338,6 @@ void multi_track_free(t_multi_track* x) {
 #endif
 
 	// Free allocated memory
-	delete x->bass_index;
-	delete x->drums_index;
-	delete x->guitar_index;
-	delete x->piano_index;
-
 	delete x->out_tread_control;
 	delete x->server_control;
 	delete x->python_import_control;
@@ -451,10 +446,10 @@ void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* ar
 	}
 
 	// Reset all instrument indices
-	*x->bass_index = 0;
-	*x->drums_index = 0;
-	*x->guitar_index = 0;
-	*x->piano_index = 0;
+	x->bass_index   = 0;
+	x->drums_index  = 0;
+	x->guitar_index = 0;
+	x->piano_index  = 0;
 
 	// Python server self-triggers inference when it has received all expected chunks
 }
@@ -650,10 +645,10 @@ void multi_track_send_reset(t_multi_track* x) {
 	p << osc::BeginMessage("/reset") << 1 << osc::EndMessage;
 	transmitSocket.Send(p.Data(), p.Size());
 
-	*x->bass_index   = 0;
-	*x->drums_index  = 0;
-	*x->guitar_index = 0;
-	*x->piano_index  = 0;
+	x->bass_index   = 0;
+	x->drums_index  = 0;
+	x->guitar_index = 0;
+	x->piano_index  = 0;
 	post("Reset");
 }
 
@@ -1632,10 +1627,10 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 		listener.guitar_outlet = x->guitar_outlet;
 		listener.piano_outlet  = x->piano_outlet;
 
-		listener.bass_index   = x->bass_index;
-		listener.drums_index  = x->drums_index;
-		listener.guitar_index = x->guitar_index;
-		listener.piano_index  = x->piano_index;
+		listener.bass_index   = &x->bass_index;
+		listener.drums_index  = &x->drums_index;
+		listener.guitar_index = &x->guitar_index;
+		listener.piano_index  = &x->piano_index;
 
 		listener.packet_test_start_time  = &x->packet_test_start_time;
 		listener.data_import_start_time  = &x->data_import_start_time;
