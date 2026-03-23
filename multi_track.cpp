@@ -443,7 +443,7 @@ void multi_track_predict(t_multi_track* x, long curr) {
 			curr, x->T_samples, x->percentage, x->pr_win_mul, (long)(x->T_samples * x->percentage));
 	}
 
-	// Read context: always curr → curr + T (independent of w)
+	// Read context: curr → curr + T*p (w only affects where we write back)
 	long read_start = curr;
 	long T        = x->T_samples;
 	long step     = (long)(T * x->percentage);  // samples exchanged per step = T * p
