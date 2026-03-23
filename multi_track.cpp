@@ -1721,7 +1721,7 @@ public:
 						r.received = 0;
 					}
 					auto t_start = std::chrono::high_resolution_clock::now();
-					post("--- Flush output started ---");
+					if (*listener->verbose_flag) post("--- Flush output started ---");
 					t_atom out_atom[2];
 					for (auto& chunk : flush_chunks) {
 						int n = chunk.empty() ? 1024 : (int)chunk.size();
@@ -1735,7 +1735,7 @@ public:
 					*current_index = 0;
 					double out_ms = std::chrono::duration<double, std::milli>(
 						std::chrono::high_resolution_clock::now() - t_start).count();
-					post("--- Flush output done (%.1f ms) — signalling completion ---", out_ms);
+					if (*listener->verbose_flag) post("--- Flush output done (%.1f ms) — signalling completion ---", out_ms);
 					listener->out_tread_control->notify();
 				}).detach();
 			}
@@ -1743,7 +1743,7 @@ public:
 			// Output all chunks in order once complete
 			if (!chunks_to_output.empty()) {
 				auto t_start = std::chrono::high_resolution_clock::now();
-				post("--- Output started ---");
+				if (*verbose_flag) post("--- Output started ---");
 				t_atom out_atom[2];
 				for (auto& chunk : chunks_to_output) {
 					for (float v : chunk) {
@@ -1758,9 +1758,11 @@ public:
 					std::chrono::high_resolution_clock::now() - t_start).count();
 				auto total_ms = std::chrono::duration<double, std::milli>(
 					std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
+				if (*verbose_flag) {
 				post("========================================");
 				post("Output done (%.1f ms) — total cycle: %.1f ms", out_ms, total_ms);
 				post("========================================");
+			}
 				out_tread_control->notify();
 			}
 
