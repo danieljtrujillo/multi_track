@@ -2,20 +2,34 @@
 	@file
 	multi_track
 
-	Max/MSP external that sends audio stems to a Python neural-network server over OSC/UDP
-	and receives predicted stems back.
+	Max/MSP external that reads audio stems directly from a multichannel buffer~,
+	sends them to a Python neural-network server over OSC/UDP, and writes the
+	predicted stems back into the same buffer.
 
 	Workflow:
-	  1. "set_command <cmd>" — store the server launch command (local or SSH).
-	  2. "server 1/0"        — start / stop the Python server process.
-	  3. "load_model"        — send current parameters (packet size, percentage, instruments) to server.
-	  4. jit_matrix input    — read a 4-plane float32 Jitter matrix (bass/drums/guitar/piano),
-	                           send each active plane in chunks via OSC to the server.
-	  5. The server runs inference and sends back predicted float chunks per stem.
-	     Chunks are reassembled in order and output through the four list outlets.
+	  1. "set_command <cmd>"        — store the server launch command (local or SSH).
+	  2. "server 1/0"               — start / stop the Python server process.
+	  3. "set_buffer <name>"        — bind to a multichannel buffer~ (N channels = N stems).
+	  4. "load_model"               — push current parameters to the server and load the model.
+	  5. "predict <curr>"           — read context from buffer at cursor position,
+	                                  send to server as OSC chunks, wait for predictions,
+	                                  and write them back into the buffer directly.
+
+	Buffer coordinate system:
+	  T           — context window size in samples (set via "T <n>")
+	  p           — predict window as fraction of T (set via "percentage <f>")
+	  w           — pr_win_mul: -1, 0, or 1 (set via "pr_win_mul <n>")
+	  curr        — cursor position passed with each "predict" message
+	  fade        — fade-in length in samples applied on write-back (set via "fade <n>")
+	  Read from:  curr → curr + T                        (full T-sample context, fixed)
+	  Write to:   curr + w*p*T → curr + (w+1)*p*T       (p*T-sample prediction window, with fade-in)
+
+	Send modes (set via "send_mode 0|1"):
+	  0 = sum     — sum all channels except target into one context plane (fast, 1/N data)
+	  1 = separate — send each non-target channel as its own plane (flexible, full data)
 
 	Inlets:  1 (message)
-	Outlets: 4 list outlets — bass (left), drums, guitar, piano (right)
+	Outlets: 1 bang — fires when prediction has been written to buffer
 
 	Tornike Karchkhadze, tkarchkhadze@ucsd.edu
 */
@@ -25,7 +39,6 @@
 
 #include "ext.h"
 #include "ext_obex.h"
-#include "jit.common.h"
 
 #include <time.h>
 #include <algorithm>
@@ -37,6 +50,7 @@
 #include <chrono>
 
 #ifdef _WIN32
+#define NOMINMAX  // prevent Windows min/max macro conflicts
 #include "shellapi.h"
 #include <windows.h>
 #include <winsock2.h>
@@ -67,6 +81,7 @@
 #include "osc/OscPacketListener.h"
 
 #include "z_dsp.h"
+#include "ext_buffer.h"
 
 #define OUTPUT_BUFFER_SIZE 65536    // Max OSC send buffer (bytes)
 #define MAX_OSC_PACKET_SIZE 65535   // Max UDP receive buffer (bytes)
@@ -107,14 +122,8 @@ typedef struct _multi_track {
 	double percentage;
 	double pr_win_mul;
 
-	// Per-stem write indices, updated as predicted data is received
-	int bass_index;
-	int drums_index;
-	int guitar_index;
-	int piano_index;
-
 	int verbose_flag;  // 1 = print timing and debug info to Max console
-	int batch_id;      // Incremented on each jit_matrix call so server can detect new batches
+	int batch_id;      // Incremented on each predict call so server can detect new batches
 
 	// OSC listener thread handle
 	t_systhread listener_thread;
@@ -124,15 +133,12 @@ typedef struct _multi_track {
 	int PORT_LISTENER;
 
 	// Thread synchronisation
-	thread_control* out_tread_control;       // Signals that output is complete
+	thread_control* out_tread_control;       // Signals that prediction write-back is complete
 	thread_control* server_control;          // Signals that server is ready
 	thread_control* python_import_control;   // Signals data import acknowledgement
 
-	// Outlets (created right-to-left; leftmost = bass)
-	void* bass_outlet;
-	void* drums_outlet;
-	void* guitar_outlet;
-	void* piano_outlet;
+	// Single bang outlet: fires when prediction has been written to buffer
+	void* done_outlet;
 
 	int package_size;  // Number of floats per OSC chunk sent to server
 
@@ -150,8 +156,16 @@ typedef struct _multi_track {
 	char client_ip[512] = { 0 }; // Public IP of this machine (sent to server as --client_ip)
 	char server_ip[512] = { 0 }; // Resolved IP of the server (used for OSC send)
 
-	int predict_flags[4];  // Per-stem: 1 = model predicts, 0 = pass through
-	int read_flag[4];      // Per-stem: 1 = send this plane to server, 0 = skip
+	int predict_flags[4];  // Per-stem: 1 = model predicts this stem, 0 = pass through
+
+	// Buffer integration
+	t_buffer_ref* buffer_ref;   // Reference to the bound multichannel buffer~
+	t_symbol*     buffer_name;  // Name of the bound buffer~
+	int           num_stems;    // Number of stems = channel count of buffer (default 4)
+	int           send_mode;    // 0 = send summed context, 1 = send channels separately
+	long          T_samples;    // Context window size in samples
+	long          fade_samples; // Fade-in length in samples applied on write-back
+	long          curr;         // Current cursor position (set with each predict call)
 
 	// High-resolution timestamps for end-to-end timing measurements
 	std::chrono::high_resolution_clock::time_point packet_test_start_time;
@@ -174,12 +188,18 @@ void		multi_track_verbose(t_multi_track* x, long command);
 void		multi_track_set_percentage(t_multi_track* x, double percentage);
 void		multi_track_set_pr_win_mul(t_multi_track* x, double pr_win_mul);
 
-void		multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
+// Buffer integration
+void		multi_track_set_buffer(t_multi_track* x, t_symbol* s);
+void		multi_track_set_send_mode(t_multi_track* x, long mode);
+void		multi_track_set_T(t_multi_track* x, long T_samples);
+void		multi_track_set_fade(t_multi_track* x, long fade_samples);
 
-void		multi_track_OSC_time_to_predict_sender(t_multi_track* x);
+// Main predict entry point: reads buffer, sends to server
+void		multi_track_predict(t_multi_track* x, long curr);
+
 void		multi_track_OSC_load_model(t_multi_track* x);
 
-void		send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size, int total_expected_chunks, int batch_id);
+void		send_float_plane(float* data, int num_samples, const char* address, int port, const char* tag, long package_size, int total_expected_chunks, int batch_id);
 
 void*		multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]);
 void		multi_track_OSC_listen_thread(t_multi_track* x);
@@ -194,7 +214,6 @@ void		get_public_ip(char* ip_buffer, size_t buffer_size);
 void		multi_track_get_client_ip(t_multi_track* x);
 
 void		multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
-void		multi_track_set_read_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
 void		multi_track_send_predict_instruments(t_multi_track* x);
 
 
@@ -216,19 +235,26 @@ void ext_main(void* r)
 		sizeof(t_multi_track), (method)NULL, A_GIMME, 0L);
 
 	class_addmethod(c, (method)multi_track_assist,              "assist",              A_CANT,  0);
-	class_addmethod(c, (method)multi_track_jit_matrix,          "jit_matrix",          A_GIMME, 0);
 
 	// Server lifecycle
 	class_addmethod(c, (method)multi_track_set_command,         "set_command",         A_GIMME, 0);
 	class_addmethod(c, (method)multi_track_server,              "server",              A_LONG,  0);
 	class_addmethod(c, (method)multi_track_load_model,          "load_model",          0);
 
-	// Parameter updates (forwarded to Python server immediately)
+	// Buffer integration
+	class_addmethod(c, (method)multi_track_set_buffer,          "set_buffer",          A_SYM,   0);
+	class_addmethod(c, (method)multi_track_set_send_mode,       "send_mode",           A_LONG,  0);
+	class_addmethod(c, (method)multi_track_set_T,               "T",                   A_LONG,  0);
+	class_addmethod(c, (method)multi_track_set_fade,            "fade",                A_LONG,  0);
+
+	// Main predict trigger — reads buffer, sends to server, writes result back
+	class_addmethod(c, (method)multi_track_predict,             "predict",             A_LONG,  0);
+
+	// Model parameters (forwarded to Python server immediately)
 	class_addmethod(c, (method)multi_track_set_percentage,      "percentage",          A_FLOAT, 0);
 	class_addmethod(c, (method)multi_track_set_pr_win_mul,      "pr_win_mul",          A_FLOAT, 0);
 	class_addmethod(c, (method)multi_track_set_packet_size,     "packet_size",         A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_predict_instruments, "predict_instruments", A_GIMME, 0);
-	class_addmethod(c, (method)multi_track_set_read_instruments,    "read_instruments",    A_GIMME, 0);
 
 	// Utility
 	class_addmethod(c, (method)multi_track_verbose,             "verbose",             A_LONG,  0);
@@ -236,7 +262,6 @@ void ext_main(void* r)
 	class_addmethod(c, (method)multi_track_send_print,          "print",               0);
 	class_addmethod(c, (method)multi_track_send_reset,          "reset",               0);
 	class_addmethod(c, (method)multi_track_get_client_ip,       "get_client_ip",       0);
-	class_addmethod(c, (method)multi_track_OSC_time_to_predict_sender, "predict",      0);
 
 	CLASS_ATTR_LONG(c, "verb", 0, t_multi_track, verbose_flag);
 
@@ -266,20 +291,21 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		x->verbose_flag = 0;
 		x->batch_id = 0;
 
-		x->bass_index   = 0;
-		x->drums_index  = 0;
-		x->guitar_index = 0;
-		x->piano_index  = 0;
-
-		x->out_tread_control    = new thread_control;
-		x->server_control       = new thread_control;
+		x->out_tread_control     = new thread_control;
+		x->server_control        = new thread_control;
 		x->python_import_control = new thread_control;
 
-		// Outlets created right-to-left: piano is rightmost, bass is leftmost
-		x->piano_outlet  = listout((t_object*)x);
-		x->guitar_outlet = listout((t_object*)x);
-		x->drums_outlet  = listout((t_object*)x);
-		x->bass_outlet   = listout((t_object*)x);
+		// Single outlet: bang when prediction has been written to buffer
+		x->done_outlet = bangout((t_object*)x);
+
+		// Buffer integration — must be set via messages before predict is called
+		x->buffer_ref   = nullptr;  // checked before use
+		x->fade_samples = 0;
+		x->curr         = 0;
+
+		// First argument is the buffer name: multi_track mybuffer
+		if (argc > 0 && atom_gettype(argv) == A_SYM)
+			multi_track_set_buffer(x, atom_getsym(argv));
 
 		attr_args_process(x, argc, argv);
 
@@ -290,10 +316,8 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		get_public_ip(x->client_ip, sizeof(x->client_ip));
 		post("Public IP: %s", x->client_ip);
 
-		for (int i = 0; i < 4; i++) {
+		for (int i = 0; i < 4; i++)
 			x->predict_flags[i] = 0;
-			x->read_flag[i] = 0;
-		}
 
 		x->auto_load_model_on_ready = false;
 	}
@@ -338,6 +362,10 @@ void multi_track_free(t_multi_track* x) {
 #endif
 
 	// Free allocated memory
+	if (x->buffer_ref) {
+		object_free(x->buffer_ref);
+		x->buffer_ref = nullptr;
+	}
 	delete x->out_tread_control;
 	delete x->server_control;
 	delete x->python_import_control;
@@ -350,108 +378,163 @@ void multi_track_free(t_multi_track* x) {
 
 
 
-// Receives a Jitter matrix by name, reads each active plane, and sends it
-// to the Python server as OSC chunks. The server self-triggers inference
-// once it has received all expected chunks.
-void multi_track_jit_matrix(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
-	// Start timing
+/**********************************************************************
+ * Buffer integration — bind, configure, and predict
+ **********************************************************************/
+
+void multi_track_set_buffer(t_multi_track* x, t_symbol* name) {
+	if (x->buffer_ref)
+		object_free(x->buffer_ref);
+	x->buffer_name = name;
+	x->buffer_ref  = buffer_ref_new((t_object*)x, name);
+
+	// Read channel count from buffer and use it as num_stems
+	t_buffer_obj* buf = buffer_ref_getobject(x->buffer_ref);
+	if (buf) {
+		x->num_stems = (int)buffer_getchannelcount(buf);
+		post("Buffer '%s' bound — %d channels / stems", name->s_name, x->num_stems);
+	} else {
+		post("Buffer '%s' bound (not yet loaded)", name->s_name);
+	}
+}
+
+void multi_track_set_send_mode(t_multi_track* x, long mode) {
+	if (mode != 0 && mode != 1) { post("send_mode must be 0 (sum) or 1 (separate)"); return; }
+	x->send_mode = (int)mode;
+	post("send_mode set to %s", mode == 0 ? "sum" : "separate");
+}
+
+void multi_track_set_T(t_multi_track* x, long T_samples) {
+	if (T_samples <= 0) { post("T must be > 0 samples"); return; }
+	x->T_samples = T_samples;
+	post("T set to %ld samples", T_samples);
+}
+
+void multi_track_set_fade(t_multi_track* x, long fade_samples) {
+	if (fade_samples < 0) { post("fade must be >= 0 samples"); return; }
+	x->fade_samples = fade_samples;
+	post("fade set to %ld samples", fade_samples);
+}
+
+
+
+// Main predict entry point.
+// Reads context from buffer, sends to server as OSC chunks.
+// The server self-triggers inference once all chunks arrive, then sends predictions back.
+// The listener writes predictions directly into the buffer and bangs done_outlet.
+void multi_track_predict(t_multi_track* x, long curr) {
+	if (!x->buffer_ref) {
+		object_error((t_object*)x, "No buffer bound. Use 'set_buffer <name>' first.");
+		return;
+	}
+
+	t_buffer_obj* buf = buffer_ref_getobject(x->buffer_ref);
+	if (!buf) {
+		object_error((t_object*)x, "Buffer '%s' not found.", x->buffer_name->s_name);
+		return;
+	}
+
+	x->curr = curr;
 	x->data_import_start_time = std::chrono::high_resolution_clock::now();
 
 	if (x->verbose_flag) {
 		post("========================================");
-		post("Data import started...");
+		post("Predict started — curr=%ld T=%ld p=%.3f w=%.1f step=%ld samples",
+			curr, x->T_samples, x->percentage, x->pr_win_mul, (long)(x->T_samples * x->percentage));
 	}
 
-	if (argc < 1 || atom_gettype(argv) != A_SYM) {
-		object_error((t_object*)x, "Invalid input. Expected a matrix name.");
+	// Read context: always curr → curr + T (independent of w)
+	long read_start = curr;
+	long T        = x->T_samples;
+	long step     = (long)(T * x->percentage);  // samples exchanged per step = T * p
+
+	float* samples = buffer_locksamples(buf);
+	if (!samples) {
+		object_error((t_object*)x, "Failed to lock buffer samples.");
 		return;
 	}
+	long frames   = buffer_getframecount(buf);
+	int  channels = (int)buffer_getchannelcount(buf);
 
-	// Extract matrix name
-	t_symbol* matrix_name = atom_getsym(argv);
-	t_object* matrix = (t_object*)jit_object_findregistered(matrix_name);
+	// Clamp read region to buffer bounds
+	long read_end = read_start + step;
+	if (read_start < 0) read_start = 0;
+	if (read_end > frames) read_end = frames;
+	long actual_T = read_end - read_start;
 
-	if (!matrix) {
-		object_error((t_object*)x, "Matrix not found: %s", matrix_name->s_name);
-		return;
-	}
+	const char* stem_tags[4] = { "/bass", "/drums", "/guitar", "/piano" };
+	int num_stems = (channels < 4) ? channels : 4;
 
-	// Lock the matrix for safe access
-	long lock = (long)jit_object_method(matrix, gensym("lock"), 1);
+	// Count how many planes we will send (depends on send_mode and predict_flags)
+	// In sum mode: one plane per target stem (sum of all other channels)
+	// In separate mode: one plane per non-target channel, per target stem
+	int num_targets = 0;
+	for (int i = 0; i < num_stems; i++)
+		if (x->predict_flags[i]) num_targets++;
 
-	// Get matrix info
-	t_jit_matrix_info info;
-	jit_object_method(matrix, gensym("getinfo"), &info);
-
-	// Ensure the matrix has 4 planes and is float32
-	if (info.type != _jit_sym_float32 || info.planecount != 4) {
-		object_error((t_object*)x, "Matrix must have 4 planes of type float32.");
-		jit_object_method(matrix, gensym("lock"), lock);
-		return;
-	}
-
-	post("Matrix dimensions: %ld x %ld (4 planes)", info.dim[0], info.dim[1]);
-
-	// Access matrix data
-	char* matrix_data;
-	jit_object_method(matrix, gensym("getdata"), &matrix_data);
-
-	if (!matrix_data) {
-		object_error((t_object*)x, "Failed to access matrix data.");
-		jit_object_method(matrix, gensym("lock"), lock);
-		return;
-	}
-
-	const char* plane_tags[4] = { "/bass", "/drums", "/guitar", "/piano" };
-
-	// Launch one thread per active plane (read_flag == 1) so all planes send concurrently
-	std::thread* threads[4] = { nullptr };
-
-	int num_active = 0;
-	for (int i = 0; i < 4; i++) {
-		if (x->read_flag[i] == 1) num_active++;
-	}
-	int num_samples_per_plane = info.dim[0] * info.dim[1];
-	int num_chunks_per_plane = (num_samples_per_plane + (int)x->package_size - 1) / (int)x->package_size;
-	int total_expected_chunks = num_active * num_chunks_per_plane;
+	int planes_per_target = (x->send_mode == 0) ? 1 : (num_stems - 1);
+	int num_planes = num_targets * planes_per_target;
+	int chunks_per_plane = ((int)actual_T + (int)x->package_size - 1) / (int)x->package_size;
+	int total_expected_chunks = num_planes * chunks_per_plane;
 	int batch_id = ++x->batch_id;
 
-	for (int i = 0; i < 4; i++) {
-		if (x->read_flag[i] == 1) {
-			threads[i] = new std::thread(send_matrix_plane, matrix_data, i, info.dim[0], info.dim[1],
-				info.dimstride[0], info.dimstride[1], x->server_ip, x->PORT_SENDER,
-				plane_tags[i], x->package_size, total_expected_chunks, batch_id);
+	// Build context planes and send — one thread per target stem
+	std::vector<std::thread> threads;
+	threads.reserve(num_targets);
+
+	for (int t = 0; t < num_stems; t++) {
+		if (!x->predict_flags[t]) continue;
+
+		if (x->send_mode == 0) {
+			// Sum all channels except target into one context plane
+			std::vector<float> context(actual_T, 0.0f);
+			for (int c = 0; c < channels && c < 4; c++) {
+				if (c == t) continue;
+				for (long i = 0; i < actual_T; i++) {
+					long frame = read_start + i;
+					context[i] += samples[frame * channels + c];
+				}
+			}
+			// Copy so the thread owns the data
+			std::vector<float> plane_data = context;
+			threads.emplace_back([plane_data, t, &x, stem_tags, total_expected_chunks, batch_id]() mutable {
+				send_float_plane(plane_data.data(), (int)plane_data.size(),
+					x->server_ip, x->PORT_SENDER, stem_tags[t],
+					x->package_size, total_expected_chunks, batch_id);
+			});
+		} else {
+			// Send each non-target channel separately
+			for (int c = 0; c < channels && c < 4; c++) {
+				if (c == t) continue;
+				std::vector<float> plane_data(actual_T);
+				for (long i = 0; i < actual_T; i++) {
+					long frame = read_start + i;
+					plane_data[i] = samples[frame * channels + c];
+				}
+				threads.emplace_back([plane_data, t, &x, stem_tags, total_expected_chunks, batch_id]() mutable {
+					send_float_plane(plane_data.data(), (int)plane_data.size(),
+						x->server_ip, x->PORT_SENDER, stem_tags[t],
+						x->package_size, total_expected_chunks, batch_id);
+				});
+			}
 		}
 	}
 
-	// Join threads
-	for (int i = 0; i < 4; i++) {
-		if (threads[i]) {
-			threads[i]->join();
-			delete threads[i];
-		}
-	}
+	buffer_unlocksamples(buf);
 
-	// Unlock the matrix
-	jit_object_method(matrix, gensym("lock"), lock);
+	for (auto& th : threads) th.join();
 
-	// End timing
 	x->data_import_end_time = std::chrono::high_resolution_clock::now();
-	double import_time_ms = std::chrono::duration<double, std::milli>(x->data_import_end_time - x->data_import_start_time).count();
+	double import_ms = std::chrono::duration<double, std::milli>(
+		x->data_import_end_time - x->data_import_start_time).count();
 
 	if (x->verbose_flag) {
-		post("All planes sent successfully.");
-		post("Data import completed in %.3f ms", import_time_ms);
+		post("Context sent in %.3f ms (%d planes, %d total chunks)",
+			import_ms, num_planes, total_expected_chunks);
 		post("========================================");
 	}
-
-	// Reset all instrument indices
-	x->bass_index   = 0;
-	x->drums_index  = 0;
-	x->guitar_index = 0;
-	x->piano_index  = 0;
-
-	// Python server self-triggers inference when it has received all expected chunks
+	// Server self-triggers inference when it has received all expected chunks.
+	// Listener writes predictions back to buffer and bangs done_outlet.
 }
 
 
@@ -569,17 +652,17 @@ void multi_track_test_packet(t_multi_track* x) {
 
 
 
-// "predict_instruments bass drums guitar piano" — 1 = model predicts this stem, 0 = pass through
+// "predict_instruments 1 0 0 0" — which stems the server should predict (1=yes, 0=pass through).
+// Context sent is all other channels (summed or separate depending on send_mode).
+// Accepts up to 4 arguments; unspecified stems default to 0.
 void multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
-	if (argc != 4) {
-		post("Error: predict_instruments requires 4 arguments (bass drums guitar piano), got %ld", argc);
+	if (argc < 1 || argc > 4) {
+		post("Error: predict_instruments requires 1–4 arguments, got %ld", argc);
 		return;
 	}
-	for (int i = 0; i < 4; i++) {
-		if (atom_gettype(&argv[i]) != A_LONG) {
-			post("Error: argument %d must be an integer (0 or 1)", i);
-			return;
-		}
+	for (int i = 0; i < 4; i++)
+		x->predict_flags[i] = 0;
+	for (int i = 0; i < (int)argc; i++) {
 		int value = (int)atom_getlong(&argv[i]);
 		if (value != 0 && value != 1) {
 			post("Error: argument %d must be 0 or 1, got %d", i, value);
@@ -590,29 +673,6 @@ void multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long arg
 	post("predict_instruments: bass=%d drums=%d guitar=%d piano=%d",
 		x->predict_flags[0], x->predict_flags[1], x->predict_flags[2], x->predict_flags[3]);
 	multi_track_send_predict_instruments(x);
-}
-
-
-// "read_instruments bass drums guitar piano" — 1 = send this plane to server, 0 = skip
-void multi_track_set_read_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
-	if (argc != 4) {
-		post("Error: read_instruments requires 4 arguments (bass drums guitar piano), got %ld", argc);
-		return;
-	}
-	for (int i = 0; i < 4; i++) {
-		if (atom_gettype(&argv[i]) != A_LONG) {
-			post("Error: argument %d must be an integer (0 or 1)", i);
-			return;
-		}
-		int value = (int)atom_getlong(&argv[i]);
-		if (value != 0 && value != 1) {
-			post("Error: argument %d must be 0 or 1, got %d", i, value);
-			return;
-		}
-		x->read_flag[i] = value;
-	}
-	post("read_instruments: bass=%d drums=%d guitar=%d piano=%d",
-		x->read_flag[0], x->read_flag[1], x->read_flag[2], x->read_flag[3]);
 }
 
 
@@ -645,10 +705,6 @@ void multi_track_send_reset(t_multi_track* x) {
 	p << osc::BeginMessage("/reset") << 1 << osc::EndMessage;
 	transmitSocket.Send(p.Data(), p.Size());
 
-	x->bass_index   = 0;
-	x->drums_index  = 0;
-	x->guitar_index = 0;
-	x->piano_index  = 0;
 	post("Reset");
 }
 
@@ -942,12 +998,10 @@ void multi_track_get_client_ip(t_multi_track* x) {
 
 void multi_track_assist(t_multi_track* x, void* b, long m, long a, char* s)
 {
-	if (m == ASSIST_INLET) {
-		sprintf(s, "Messages");
-	} else {
-		const char* names[] = { "bass", "drums", "guitar", "piano" };
-		sprintf(s, "%s [index value]", names[a]);
-	}
+	if (m == ASSIST_INLET)
+		sprintf(s, "Messages: predict <curr>, set_buffer <name>, T <n>, fade <n>, pr_win_mul <-1|0|1>, send_mode 0|1, ...");
+	else
+		sprintf(s, "bang — prediction written to buffer");
 }
 
 void multi_track_verbose(t_multi_track* x, long command) {
@@ -1194,18 +1248,17 @@ void multi_track_server(t_multi_track* x, long command) {
 
 
 /**********************************************************************
- * Data Send — called from per-plane threads during jit_matrix
+ * Data Send — called from per-stem threads during predict
  **********************************************************************/
 
-// Sends one plane of a Jitter matrix to the Python server as OSC chunks.
+// Sends a float array to the Python server as OSC chunks.
 // Each chunk carries: batch_id, start_index, total_expected_chunks, and float values.
 // Called concurrently from separate threads (one per active plane).
-void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long dimstride0, long dimstride1, const char* address, int port, const char* tag, long package_size, int total_expected_chunks, int batch_id) {
+void send_float_plane(float* data, int num_samples, const char* address, int port, const char* tag, long package_size, int total_expected_chunks, int batch_id) {
 	UdpTransmitSocket transmitSocket(IpEndpointName(address, port));
 	char osc_buffer[OUTPUT_BUFFER_SIZE];
 
-	int num_samples = dim0 * dim1; // Total samples in the plane
-	int num_chunks = (num_samples + package_size - 1) / package_size; // Round up
+	int num_chunks = (num_samples + package_size - 1) / package_size;
 
 	for (int chunk = 0; chunk < num_chunks; chunk++) {
 		osc::OutboundPacketStream p(osc_buffer, OUTPUT_BUFFER_SIZE);
@@ -1213,19 +1266,13 @@ void send_matrix_plane(char* matrix_data, int plane, long dim0, long dim1, long 
 		p << osc::BeginMessage(tag);
 
 		int start_index = chunk * package_size;
+		int end_index   = (start_index + (int)package_size < num_samples) ? start_index + (int)package_size : num_samples;
 		p << batch_id;
 		p << start_index;
 		p << total_expected_chunks;
-		int end_index = (start_index + package_size < num_samples) ? start_index + package_size : num_samples;
 
-		for (int i = start_index; i < end_index; i++) {
-			int row = i / dim1;
-			int col = i % dim1;
-			int matrix_index = row * dimstride0 / sizeof(float) + col * dimstride1 / sizeof(float) + plane;
-
-			float value = ((float*)matrix_data)[matrix_index];
-			p << value;
-		}
+		for (int i = start_index; i < end_index; i++)
+			p << data[i];
 
 		p << osc::EndMessage;
 		transmitSocket.Send(p.Data(), p.Size());
@@ -1242,14 +1289,6 @@ void multi_track_OSC_load_model(t_multi_track* x) {
 	transmitSocket.Send(p.Data(), p.Size());
 }
 
-// Manually trigger inference (normally the server self-triggers after all chunks arrive)
-void multi_track_OSC_time_to_predict_sender(t_multi_track* x) {
-	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
-	char buffer[32];
-	osc::OutboundPacketStream p(buffer, 32);
-	p << osc::BeginMessage("/predict") << 1 << osc::EndMessage;
-	transmitSocket.Send(p.Data(), p.Size());
-}
 
 
 
@@ -1267,15 +1306,16 @@ public:
 	thread_control* server_control;
 	thread_control* python_import_control;
 
-	void* bass_outlet;
-	void* drums_outlet;
-	void* guitar_outlet;
-	void* piano_outlet;
+	// Bang outlet — fires when prediction has been written to buffer
+	void* done_outlet;
 
-	int* bass_index;
-	int* drums_index;
-	int* guitar_index;
-	int* piano_index;
+	// Buffer write-back state (pointers into t_multi_track)
+	t_buffer_ref** buffer_ref;
+	long* curr;
+	long* T_samples;
+	long* fade_samples;
+	double* percentage;
+	double* pr_win_mul;
 
 	// Chunk reassembly — buffers incoming chunks per stem until all arrive, then outputs in order
 	struct StemReassembly {
@@ -1370,18 +1410,13 @@ public:
 				post("========================================");
 			}
 
-			// Prediction data chunks — reassemble per stem then output in order
+			// Prediction data chunks — reassemble per stem then write to buffer
 			int stem_idx = -1;
-			void* target_outlet = nullptr;
-			int* current_index = nullptr;
-
-			if      (std::strcmp(m.AddressPattern(), "/bass")   == 0) { stem_idx = 0; target_outlet = bass_outlet;   current_index = bass_index; }
-			else if (std::strcmp(m.AddressPattern(), "/drums")  == 0) { stem_idx = 1; target_outlet = drums_outlet;  current_index = drums_index; }
-			else if (std::strcmp(m.AddressPattern(), "/guitar") == 0) { stem_idx = 2; target_outlet = guitar_outlet; current_index = guitar_index; }
-			else if (std::strcmp(m.AddressPattern(), "/piano")  == 0) { stem_idx = 3; target_outlet = piano_outlet;  current_index = piano_index; }
-			else {
-				return;
-			}
+			if      (std::strcmp(m.AddressPattern(), "/bass")   == 0) stem_idx = 0;
+			else if (std::strcmp(m.AddressPattern(), "/drums")  == 0) stem_idx = 1;
+			else if (std::strcmp(m.AddressPattern(), "/guitar") == 0) stem_idx = 2;
+			else if (std::strcmp(m.AddressPattern(), "/piano")  == 0) stem_idx = 3;
+			else return;
 
 			osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
 			osc::int32 chunk_idx, total_chunks;
@@ -1437,12 +1472,73 @@ public:
 				}
 			}
 
+			// Helper: write assembled chunks into the buffer at the correct position,
+			// apply fade-in, then bang done_outlet.
+			auto write_to_buffer = [this, stem_idx](std::vector<std::vector<float>>& chunks, bool is_flush) {
+				auto t_start = std::chrono::high_resolution_clock::now();
+				if (*verbose_flag) post("--- Write to buffer started (stem %d%s) ---", stem_idx, is_flush ? ", flush" : "");
+
+				t_buffer_obj* buf = buffer_ref_getobject(*buffer_ref);
+				if (!buf) {
+					post("WARNING: buffer not available for write-back");
+					out_tread_control->notify();
+					return;
+				}
+
+				float* samples = buffer_locksamples(buf);
+				if (!samples) {
+					post("WARNING: could not lock buffer samples");
+					out_tread_control->notify();
+					return;
+				}
+
+				long   frames       = buffer_getframecount(buf);
+				int    channels     = (int)buffer_getchannelcount(buf);
+				// Write position: curr + w * p * T
+				// Write position: curr + w*p*T → curr + (w+1)*p*T
+				long   write_start  = *curr + (long)(*pr_win_mul * *percentage * *T_samples);
+				long   fade         = *fade_samples;
+				long   write_pos    = write_start;
+
+				for (auto& chunk : chunks) {
+					int n = chunk.empty() ? 1024 : (int)chunk.size();
+					for (int k = 0; k < n; k++) {
+						if (write_pos >= 0 && write_pos < frames) {
+							float v = chunk.empty() ? 0.0f : chunk[k];
+							// Apply linear fade-in at the start of the write region
+							if (fade > 0 && (write_pos - write_start) < fade) {
+								float t = (float)(write_pos - write_start) / (float)fade;
+								v *= t;
+							}
+							samples[write_pos * channels + stem_idx] = v;
+						}
+						write_pos++;
+					}
+				}
+
+				buffer_unlocksamples(buf);
+				buffer_setdirty(buf);
+
+				if (*verbose_flag) {
+					double out_ms = std::chrono::duration<double, std::milli>(
+						std::chrono::high_resolution_clock::now() - t_start).count();
+					double total_ms = std::chrono::duration<double, std::milli>(
+						std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
+					post("========================================");
+					post("Write done (%.1f ms) — total cycle: %.1f ms", out_ms, total_ms);
+					post("========================================");
+				}
+
+				// Bang done outlet and signal output thread
+				outlet_bang(done_outlet);
+				out_tread_control->notify();
+			};
+
 			// Watchdog — fires if remaining chunks don't arrive within the adaptive timeout.
 			// Each chunk resets the watchdog via watchdog_gen; stale watchdogs self-cancel.
 			if (spawn_watchdog) {
 				auto* listener = this;
-				std::thread([listener, stem_idx, watchdog_gen, watchdog_timeout_ms,
-				             target_outlet, current_index]() {
+				std::thread([listener, stem_idx, watchdog_gen, watchdog_timeout_ms, write_to_buffer]() {
 					std::this_thread::sleep_for(
 						std::chrono::duration<double, std::milli>(watchdog_timeout_ms));
 					std::vector<std::vector<float>> flush_chunks;
@@ -1450,56 +1546,19 @@ public:
 						std::lock_guard<std::mutex> lock(listener->reassembly_mutex);
 						auto& r = listener->reassembly[stem_idx];
 						if (r.watchdog_gen != watchdog_gen || r.received == 0) return;
-						post("WARNING: watchdog fired — missing %d/%d chunks, flushing with zeros",
-						     r.expected - r.received, r.expected);
+						post("WARNING: watchdog fired — missing %d/%d chunks for stem %d, flushing with zeros",
+							r.expected - r.received, r.expected, stem_idx);
 						flush_chunks = std::move(r.chunks);
 						r.chunks.clear();
 						r.received = 0;
 					}
-					auto t_start = std::chrono::high_resolution_clock::now();
-					if (*listener->verbose_flag) post("--- Flush output started ---");
-					t_atom out_atom[2];
-					for (auto& chunk : flush_chunks) {
-						int n = chunk.empty() ? 1024 : (int)chunk.size();
-						for (int k = 0; k < n; k++) {
-							atom_setlong(&out_atom[0], *current_index + 1);
-							atom_setfloat(&out_atom[1], chunk.empty() ? 0.0f : chunk[k]);
-							outlet_list(target_outlet, 0L, 2, out_atom);
-							(*current_index)++;
-						}
-					}
-					*current_index = 0;
-					double out_ms = std::chrono::duration<double, std::milli>(
-						std::chrono::high_resolution_clock::now() - t_start).count();
-					if (*listener->verbose_flag) post("--- Flush output done (%.1f ms) — signalling completion ---", out_ms);
-					listener->out_tread_control->notify();
+					write_to_buffer(flush_chunks, true);
 				}).detach();
 			}
 
-			// All chunks received — output in order, then signal the output thread
+			// All chunks received — write to buffer in order, then signal done
 			if (!chunks_to_output.empty()) {
-				auto t_start = std::chrono::high_resolution_clock::now();
-				if (*verbose_flag) post("--- Output started ---");
-				t_atom out_atom[2];
-				for (auto& chunk : chunks_to_output) {
-					for (float v : chunk) {
-						atom_setlong(&out_atom[0], *current_index + 1);  // 1-based index
-						atom_setfloat(&out_atom[1], v);
-						outlet_list(target_outlet, 0L, 2, out_atom);
-						(*current_index)++;
-					}
-				}
-				*current_index = 0;
-				if (*verbose_flag) {
-					double out_ms = std::chrono::duration<double, std::milli>(
-						std::chrono::high_resolution_clock::now() - t_start).count();
-					double total_ms = std::chrono::duration<double, std::milli>(
-						std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
-					post("========================================");
-					post("Output done (%.1f ms) — total cycle: %.1f ms", out_ms, total_ms);
-					post("========================================");
-				}
-				out_tread_control->notify();
+				write_to_buffer(chunks_to_output, false);
 			}
 
 		}
@@ -1622,24 +1681,23 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 	try {
 		multi_track_packetListener listener;
 
-		listener.bass_outlet   = x->bass_outlet;
-		listener.drums_outlet  = x->drums_outlet;
-		listener.guitar_outlet = x->guitar_outlet;
-		listener.piano_outlet  = x->piano_outlet;
+		// Buffer write-back
+		listener.done_outlet  = x->done_outlet;
+		listener.buffer_ref   = &x->buffer_ref;
+		listener.curr         = &x->curr;
+		listener.T_samples    = &x->T_samples;
+		listener.fade_samples = &x->fade_samples;
+		listener.percentage   = &x->percentage;
+		listener.pr_win_mul   = &x->pr_win_mul;
 
-		listener.bass_index   = &x->bass_index;
-		listener.drums_index  = &x->drums_index;
-		listener.guitar_index = &x->guitar_index;
-		listener.piano_index  = &x->piano_index;
-
-		listener.packet_test_start_time  = &x->packet_test_start_time;
-		listener.data_import_start_time  = &x->data_import_start_time;
-		listener.verbose_flag            = &x->verbose_flag;
+		listener.packet_test_start_time   = &x->packet_test_start_time;
+		listener.data_import_start_time   = &x->data_import_start_time;
+		listener.verbose_flag             = &x->verbose_flag;
 		listener.auto_load_model_on_ready = &x->auto_load_model_on_ready;
-		listener.multi_track_obj         = x;
+		listener.multi_track_obj          = x;
 
-		listener.out_tread_control    = x->out_tread_control;
-		listener.server_control       = x->server_control;
+		listener.out_tread_control     = x->out_tread_control;
+		listener.server_control        = x->server_control;
 		listener.python_import_control = x->python_import_control;
 
 		CustomUdpListener udpListener(x->PORT_LISTENER, &listener);
