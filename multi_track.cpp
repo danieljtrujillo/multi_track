@@ -165,7 +165,7 @@ typedef struct _multi_track {
 	int           num_stems;    // Number of stems = channel count of buffer (default 4)
 	int           send_mode;    // 0 = send summed context, 1 = send channels separately
 	long          T_samples;    // Context window size in samples
-	long          fade_samples; // Fade-in length in samples applied on write-back
+	double        fade_ratio;   // Crossfade overlap as fraction of sampling rate (e.g. 0.02 = ~882 samples at 44100)
 	long          curr;         // Current cursor position (set with each predict call)
 
 	// High-resolution timestamps for end-to-end timing measurements
@@ -193,7 +193,7 @@ void		multi_track_set_pr_win_mul(t_multi_track* x, double pr_win_mul);
 void		multi_track_set_buffer(t_multi_track* x, t_symbol* s);
 void		multi_track_set_send_mode(t_multi_track* x, long mode);
 void		multi_track_set_T(t_multi_track* x, long T_samples);
-void		multi_track_set_fade(t_multi_track* x, long fade_samples);
+void		multi_track_set_fade(t_multi_track* x, double fade_ratio);
 
 void		multi_track_set_live_mode(t_multi_track* x, long mode);
 
@@ -248,7 +248,7 @@ void ext_main(void* r)
 	class_addmethod(c, (method)multi_track_set_buffer,          "set_buffer",          A_SYM,   0);
 	class_addmethod(c, (method)multi_track_set_send_mode,       "send_mode",           A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_T,               "T",                   A_LONG,  0);
-	class_addmethod(c, (method)multi_track_set_fade,            "fade",                A_LONG,  0);
+	class_addmethod(c, (method)multi_track_set_fade,            "fade",                A_FLOAT, 0);
 	class_addmethod(c, (method)multi_track_set_live_mode,       "live_mode",           A_LONG,  0);
 
 	// Main predict trigger — reads buffer, sends to server, writes result back
@@ -304,7 +304,7 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 
 		// Buffer integration — must be set via messages before predict is called
 		x->buffer_ref   = nullptr;  // checked before use
-		x->fade_samples = 0;
+		x->fade_ratio   = 0.0;
 		x->curr         = 0;
 		x->live_mode    = 0;
 
@@ -415,10 +415,16 @@ void multi_track_set_T(t_multi_track* x, long T_samples) {
 	post("T set to %ld samples", T_samples);
 }
 
-void multi_track_set_fade(t_multi_track* x, long fade_samples) {
-	if (fade_samples < 0) { post("fade must be >= 0 samples"); return; }
-	x->fade_samples = fade_samples;
-	post("fade set to %ld samples", fade_samples);
+void multi_track_set_fade(t_multi_track* x, double ratio) {
+	if (ratio < 0.0 || ratio > 1.0) { post("fade ratio must be 0.0 – 1.0"); return; }
+	x->fade_ratio = ratio;
+	post("fade ratio set to %f", ratio);
+
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+	char buffer[64];
+	osc::OutboundPacketStream p(buffer, 64);
+	p << osc::BeginMessage("/update_fade") << ratio << osc::EndMessage;
+	transmitSocket.Send(p.Data(), p.Size());
 }
 
 void multi_track_set_live_mode(t_multi_track* x, long mode) {
@@ -1069,6 +1075,7 @@ void multi_track_load_model(t_multi_track* x) {
 	multi_track_set_packet_size(x, x->package_size);
 	multi_track_set_percentage(x, x->percentage);
 	multi_track_set_pr_win_mul(x, x->pr_win_mul);
+	multi_track_set_fade(x, x->fade_ratio);
 	multi_track_send_predict_instruments(x);
 	multi_track_verbose(x, x->verbose_flag);  // sync verbose state to server
 	multi_track_OSC_load_model(x);
@@ -1363,7 +1370,7 @@ public:
 	t_buffer_ref** buffer_ref;
 	long* curr;
 	long* T_samples;
-	long* fade_samples;
+	double* fade_ratio;
 	double* percentage;
 	double* pr_win_mul;
 	int*    live_mode;
@@ -1545,11 +1552,13 @@ public:
 
 				long   frames       = buffer_getframecount(buf);
 				int    channels     = (int)buffer_getchannelcount(buf);
-				// Write position: curr + w * p * T
 				// Write position: curr + w*p*T → curr + (w+1)*p*T
-				long   write_start  = *curr + (long)(*pr_win_mul * *percentage * *T_samples);
-				long   fade         = *fade_samples;
-				long   write_pos    = write_start;
+				// With crossfade: writing starts 'fade' samples early so the first
+				// 'fade' samples blend existing buffer content into the new prediction.
+				long   fade          = (long)(*fade_ratio * buffer_getsamplerate(buf));
+				long   content_start = *curr + (long)(*pr_win_mul * *percentage * *T_samples);
+				long   write_start   = content_start - fade;   // start fade samples before content
+				long   write_pos     = write_start;
 
 				for (auto& chunk : chunks) {
 					int n = chunk.empty() ? 1024 : (int)chunk.size();
@@ -1558,10 +1567,12 @@ public:
 						long wp = (*live_mode && write_pos >= frames) ? write_pos % frames : write_pos;
 						if (wp >= 0 && wp < frames) {
 							float v = chunk.empty() ? 0.0f : chunk[k];
-							// Apply linear fade-in at the start of the write region
-							if (fade > 0 && (write_pos - write_start) < fade) {
-								float t = (float)(write_pos - write_start) / (float)fade;
-								v *= t;
+							// Crossfade: blend existing → new over the first 'fade' samples
+							long offset = write_pos - write_start;
+							if (fade > 0 && offset < fade) {
+								float t = (float)offset / (float)fade;
+								float existing = samples[wp * channels + stem_idx];
+								v = existing * (1.0f - t) + v * t;
 							}
 							samples[wp * channels + stem_idx] = v;
 						}
@@ -1571,6 +1582,9 @@ public:
 
 				buffer_unlocksamples(buf);
 				buffer_setdirty(buf);
+
+				post("[WRITE] first_sample=%ld  last_sample=%ld  total=%ld  fade=%ld  content_start=%ld",
+					write_start, write_pos - 1, write_pos - write_start, fade, content_start);
 
 				if (*verbose_flag) {
 					auto t_now = std::chrono::high_resolution_clock::now();
@@ -1742,7 +1756,7 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 		listener.buffer_ref   = &x->buffer_ref;
 		listener.curr         = &x->curr;
 		listener.T_samples    = &x->T_samples;
-		listener.fade_samples = &x->fade_samples;
+		listener.fade_ratio   = &x->fade_ratio;
 		listener.percentage   = &x->percentage;
 		listener.pr_win_mul   = &x->pr_win_mul;
 		listener.live_mode    = &x->live_mode;
