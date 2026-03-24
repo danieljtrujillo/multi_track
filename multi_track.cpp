@@ -157,6 +157,7 @@ typedef struct _multi_track {
 	char server_ip[512] = { 0 }; // Resolved IP of the server (used for OSC send)
 
 	int predict_flags[4];  // Per-stem: 1 = model predicts this stem, 0 = pass through
+	int live_mode;         // 0 = skip predict at curr=0, 1 = cycle (read tail of buffer)
 
 	// Buffer integration
 	t_buffer_ref* buffer_ref;   // Reference to the bound multichannel buffer~
@@ -193,6 +194,8 @@ void		multi_track_set_buffer(t_multi_track* x, t_symbol* s);
 void		multi_track_set_send_mode(t_multi_track* x, long mode);
 void		multi_track_set_T(t_multi_track* x, long T_samples);
 void		multi_track_set_fade(t_multi_track* x, long fade_samples);
+
+void		multi_track_set_live_mode(t_multi_track* x, long mode);
 
 // Main predict entry point: reads buffer, sends to server
 void		multi_track_predict(t_multi_track* x, long curr);
@@ -246,6 +249,7 @@ void ext_main(void* r)
 	class_addmethod(c, (method)multi_track_set_send_mode,       "send_mode",           A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_T,               "T",                   A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_fade,            "fade",                A_LONG,  0);
+	class_addmethod(c, (method)multi_track_set_live_mode,       "live_mode",           A_LONG,  0);
 
 	// Main predict trigger — reads buffer, sends to server, writes result back
 	class_addmethod(c, (method)multi_track_predict,             "predict",             A_LONG,  0);
@@ -302,6 +306,7 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		x->buffer_ref   = nullptr;  // checked before use
 		x->fade_samples = 0;
 		x->curr         = 0;
+		x->live_mode    = 0;
 
 		// First argument is the buffer name: multi_track mybuffer
 		if (argc > 0 && atom_gettype(argv) == A_SYM)
@@ -416,6 +421,12 @@ void multi_track_set_fade(t_multi_track* x, long fade_samples) {
 	post("fade set to %ld samples", fade_samples);
 }
 
+void multi_track_set_live_mode(t_multi_track* x, long mode) {
+	if (mode != 0 && mode != 1) { post("live_mode must be 0 or 1"); return; }
+	x->live_mode = (int)mode;
+	post("live_mode set to %d (%s)", mode, mode ? "cycling" : "normal");
+}
+
 
 
 // Main predict entry point.
@@ -434,20 +445,35 @@ void multi_track_predict(t_multi_track* x, long curr) {
 		return;
 	}
 
+	// In normal mode, skip at curr=0 (no past context yet).
+	// In live_mode, curr=0 means buffer cycled — tail becomes context, so allow it.
+	if (curr == 0 && !x->live_mode) return;
+
 	x->curr = curr;
 	x->data_import_start_time = std::chrono::high_resolution_clock::now();
 
 	if (x->verbose_flag) {
-		post("========================================");
-		post("Predict started — curr=%ld T=%ld p=%.3f w=%.1f step=%ld samples",
-			curr, x->T_samples, x->percentage, x->pr_win_mul, (long)(x->T_samples * x->percentage));
+		// Wall clock timestamp at predict trigger
+		auto now_sys = std::chrono::system_clock::now();
+		std::time_t now_t = std::chrono::system_clock::to_time_t(now_sys);
+		auto ms_part = std::chrono::duration_cast<std::chrono::milliseconds>(
+			now_sys.time_since_epoch()).count() % 1000;
+		std::tm tm_buf;
+#ifdef _WIN32
+		localtime_s(&tm_buf, &now_t);
+#else
+		localtime_r(&now_t, &tm_buf);
+#endif
+		post("----------------------------------------");
+		post("[PREDICT] curr=%-8ld  %02d:%02d:%02d.%03lld",
+			curr, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, (long long)ms_part);
 	}
 
-	// Read context: curr → curr + T*p (w only affects where we write back)
-	long read_start = curr;
-	long T        = x->T_samples;
-	long step     = (long)(T * x->percentage);  // samples exchanged per step = T * p
+	long T    = x->T_samples;
+	long step = (long)(T * x->percentage);  // p*T samples per step
 
+	// In live_mode, curr=0 means the buffer just cycled — read the tail as context.
+	// In normal mode curr=0 is already guarded above.
 	float* samples = buffer_locksamples(buf);
 	if (!samples) {
 		object_error((t_object*)x, "Failed to lock buffer samples.");
@@ -456,8 +482,16 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	long frames   = buffer_getframecount(buf);
 	int  channels = (int)buffer_getchannelcount(buf);
 
-	// Clamp read region to buffer bounds
-	long read_end = read_start + step;
+	// In live_mode at cycle point (curr=0): read the tail of the buffer as context.
+	// Normally: read the step samples immediately before the cursor.
+	long read_start, read_end;
+	if (curr == 0 && x->live_mode) {
+		read_start = frames - step;
+		read_end   = frames;
+	} else {
+		read_start = curr - step;
+		read_end   = curr;
+	}
 	if (read_start < 0) read_start = 0;
 	if (read_end > frames) read_end = frames;
 	long actual_T = read_end - read_start;
@@ -520,18 +554,27 @@ void multi_track_predict(t_multi_track* x, long curr) {
 		}
 	}
 
+	if (x->verbose_flag) {
+		double t_send_start = std::chrono::duration<double, std::milli>(
+			std::chrono::high_resolution_clock::now() - x->data_import_start_time).count();
+		post("[SEND]    start  +%.1f ms", t_send_start);
+	}
+
 	buffer_unlocksamples(buf);
 
 	for (auto& th : threads) th.join();
 
 	x->data_import_end_time = std::chrono::high_resolution_clock::now();
-	double import_ms = std::chrono::duration<double, std::milli>(
-		x->data_import_end_time - x->data_import_start_time).count();
 
 	if (x->verbose_flag) {
-		post("Context sent in %.3f ms (%d planes, %d total chunks)",
-			import_ms, num_planes, total_expected_chunks);
-		post("========================================");
+		double t_send_done = std::chrono::duration<double, std::milli>(
+			x->data_import_end_time - x->data_import_start_time).count();
+		auto _now_sys = std::chrono::system_clock::now();
+		std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
+		auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
+		std::tm _tm; localtime_s(&_tm, &_now_t);
+		post("[SEND]    done   +%.1f ms  (%d chunks)  %02d:%02d:%02d.%03lld",
+			t_send_done, total_expected_chunks, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
 	}
 	// Server self-triggers inference when it has received all expected chunks.
 	// Listener writes predictions back to buffer and bangs done_outlet.
@@ -1010,6 +1053,12 @@ void multi_track_verbose(t_multi_track* x, long command) {
 		post("Verbose on — listening on port %d, sending to port %d",
 			x->PORT_LISTENER, x->PORT_SENDER);
 	}
+	// Mirror to Python server so its timing prints stay in sync
+	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
+	char buffer[64];
+	osc::OutboundPacketStream p(buffer, 64);
+	p << osc::BeginMessage("/verbose") << (int)command << osc::EndMessage;
+	transmitSocket.Send(p.Data(), p.Size());
 }
 
 
@@ -1021,6 +1070,7 @@ void multi_track_load_model(t_multi_track* x) {
 	multi_track_set_percentage(x, x->percentage);
 	multi_track_set_pr_win_mul(x, x->pr_win_mul);
 	multi_track_send_predict_instruments(x);
+	multi_track_verbose(x, x->verbose_flag);  // sync verbose state to server
 	multi_track_OSC_load_model(x);
 	post("Model load request sent.");
 }
@@ -1316,6 +1366,7 @@ public:
 	long* fade_samples;
 	double* percentage;
 	double* pr_win_mul;
+	int*    live_mode;
 
 	// Chunk reassembly — buffers incoming chunks per stem until all arrive, then outputs in order
 	struct StemReassembly {
@@ -1371,20 +1422,6 @@ public:
 				}
 			}
 
-			// Timing marker only — completion is driven by chunk reassembly, not this message.
-			// (Over the internet, this small packet can arrive before the data chunks.)
-			if (std::strcmp(m.AddressPattern(), "/server_predicted") == 0) {
-				osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
-				bool server_predicted;
-				args >> server_predicted >> osc::EndMessage;
-				if (server_predicted && *verbose_flag) {
-					double ms = std::chrono::duration<double, std::milli>(
-						std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
-					post("========================================");
-					post("/server_predicted received (%.3f ms since import)", ms);
-					post("========================================");
-				}
-			}
 
 			if (std::strcmp(m.AddressPattern(), "/packet_test_response") == 0) {
 				double round_trip_ms = std::chrono::duration<double, std::milli>(
@@ -1445,6 +1482,16 @@ public:
 					r.expected = total_chunks;
 					r.received = 0;
 					r.first_chunk_time = std::chrono::high_resolution_clock::now();
+					if (*verbose_flag) {
+						double t_rx_first = std::chrono::duration<double, std::milli>(
+							r.first_chunk_time - *data_import_start_time).count();
+						auto _now_sys = std::chrono::system_clock::now();
+						std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
+						auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
+						std::tm _tm; localtime_s(&_tm, &_now_t);
+						post("[RX]      first  +%.1f ms  (%s)  %02d:%02d:%02d.%03lld",
+							t_rx_first, m.AddressPattern(), _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
+					}
 				}
 
 				if (chunk_idx < (int)r.chunks.size() && r.chunks[chunk_idx].empty()) {
@@ -1457,7 +1504,11 @@ public:
 					chunks_to_output = std::move(r.chunks);
 					r.chunks.clear();
 					r.received = 0;
-					post("All %d chunks received for %s — outputting", total_chunks, m.AddressPattern());
+					if (*verbose_flag) {
+						double t_rx_done = std::chrono::duration<double, std::milli>(
+							std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
+						post("[RX]      complete +%.1f ms  (%s, %d chunks)", t_rx_done, m.AddressPattern(), total_chunks);
+					}
 				} else {
 					// Reset adaptive watchdog on every chunk arrival.
 					// Timeout = avg inter-chunk interval × 5 (same formula as Python server).
@@ -1476,7 +1527,7 @@ public:
 			// apply fade-in, then bang done_outlet.
 			auto write_to_buffer = [this, stem_idx](std::vector<std::vector<float>>& chunks, bool is_flush) {
 				auto t_start = std::chrono::high_resolution_clock::now();
-				if (*verbose_flag) post("--- Write to buffer started (stem %d%s) ---", stem_idx, is_flush ? ", flush" : "");
+				if (*verbose_flag && is_flush) post("[WRITE]   flush (stem %d, missing chunks filled with zeros)", stem_idx);
 
 				t_buffer_obj* buf = buffer_ref_getobject(*buffer_ref);
 				if (!buf) {
@@ -1503,14 +1554,16 @@ public:
 				for (auto& chunk : chunks) {
 					int n = chunk.empty() ? 1024 : (int)chunk.size();
 					for (int k = 0; k < n; k++) {
-						if (write_pos >= 0 && write_pos < frames) {
+						// In live_mode, wrap write position when it reaches end of buffer
+						long wp = (*live_mode && write_pos >= frames) ? write_pos % frames : write_pos;
+						if (wp >= 0 && wp < frames) {
 							float v = chunk.empty() ? 0.0f : chunk[k];
 							// Apply linear fade-in at the start of the write region
 							if (fade > 0 && (write_pos - write_start) < fade) {
 								float t = (float)(write_pos - write_start) / (float)fade;
 								v *= t;
 							}
-							samples[write_pos * channels + stem_idx] = v;
+							samples[wp * channels + stem_idx] = v;
 						}
 						write_pos++;
 					}
@@ -1520,13 +1573,16 @@ public:
 				buffer_setdirty(buf);
 
 				if (*verbose_flag) {
-					double out_ms = std::chrono::duration<double, std::milli>(
-						std::chrono::high_resolution_clock::now() - t_start).count();
-					double total_ms = std::chrono::duration<double, std::milli>(
-						std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
-					post("========================================");
-					post("Write done (%.1f ms) — total cycle: %.1f ms", out_ms, total_ms);
-					post("========================================");
+					auto t_now = std::chrono::high_resolution_clock::now();
+					double write_ms = std::chrono::duration<double, std::milli>(t_now - t_start).count();
+					double total_ms = std::chrono::duration<double, std::milli>(t_now - *data_import_start_time).count();
+					auto _now_sys = std::chrono::system_clock::now();
+					std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
+					auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
+					std::tm _tm; localtime_s(&_tm, &_now_t);
+					post("[WRITE]   done   +%.1f ms  (write %.1f ms)  total: %.1f ms  %02d:%02d:%02d.%03lld",
+						total_ms, write_ms, total_ms, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
+					post("----------------------------------------");
 				}
 
 				// Bang done outlet and signal output thread
@@ -1689,6 +1745,7 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 		listener.fade_samples = &x->fade_samples;
 		listener.percentage   = &x->percentage;
 		listener.pr_win_mul   = &x->pr_win_mul;
+		listener.live_mode    = &x->live_mode;
 
 		listener.packet_test_start_time   = &x->packet_test_start_time;
 		listener.data_import_start_time   = &x->data_import_start_time;

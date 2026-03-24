@@ -2,86 +2,105 @@
 <?xml-stylesheet href="./_c74_ref.xsl" type="text/xsl"?>
 <c74object name="multi_track" module="max">
 
-	<digest>Multi-track audio source separation via neural network Python server</digest>
+	<digest>Neural network audio stem prediction directly to/from buffer~</digest>
 
 	<description>
-		Sends audio data to a Python server over OSC for neural network inference,
-		separating audio into four instrument stems: bass, drums, guitar, and piano.
-		Communicates via OSC on configurable UDP ports.
+		Reads audio context directly from a multichannel buffer~, sends it to a Python
+		neural network server over OSC/UDP for inference, and writes the predicted stems
+		back into the same buffer.
+
+		Buffer coordinate system:
+		T = context window size in samples (full model receptive field).
+		p = percentage — prediction window as a fraction of T.
+		w = pr_win_mul (-1, 0, 1) — which window slot to write into relative to cursor.
+		Read context: [curr - p*T → curr] (p*T samples before the cursor).
+		Write prediction: [curr + w*p*T → curr + (w+1)*p*T].
 	</description>
+
+	<objarglist>
+		<objarg name="buffer-name" type="symbol" optional="1">
+			<digest>Name of the multichannel buffer~ to read from and write to</digest>
+			<description>
+				Pass the buffer name as the first argument: <o>multi_track mybuffer</o>.
+				The number of channels in the buffer determines the number of stems.
+				Can also be set at runtime via the <m>set_buffer</m> message.
+			</description>
+		</objarg>
+	</objarglist>
 
 	<inletlist>
 		<inlet id="0" type="message">
-			<digest>Messages and jit_matrix input</digest>
+			<digest>Messages: predict, set_buffer, T, fade, send_mode, percentage, pr_win_mul, ...</digest>
 		</inlet>
 	</inletlist>
 
 	<outletlist>
-		<outlet id="0" type="message">
-			<digest>Bass — outputs index/value pairs of bass audio data</digest>
-		</outlet>
-		<outlet id="1" type="message">
-			<digest>Drums — outputs index/value pairs of drums audio data</digest>
-		</outlet>
-		<outlet id="2" type="message">
-			<digest>Guitar — outputs index/value pairs of guitar audio data</digest>
-		</outlet>
-		<outlet id="3" type="message">
-			<digest>Piano — outputs index/value pairs of piano audio data</digest>
+		<outlet id="0" type="bang">
+			<digest>Bang — fires when the predicted stem has been written to the buffer</digest>
 		</outlet>
 	</outletlist>
 
 	<methodlist>
 
-		<method name="jit_matrix">
-			<arglist>
-				<arg name="matrix-name" type="symbol" optional="0" />
-			</arglist>
-			<digest>Send a Jitter matrix to the Python server for processing</digest>
-			<description>
-				Accepts a float32 Jitter matrix with 4 planes (one per instrument: bass, drums, guitar, piano)
-				and sends it to the Python server for source separation inference.
-			</description>
-		</method>
-
-		<method name="server">
-			<arglist>
-				<arg name="state" type="int" optional="0" />
-			</arglist>
-			<digest>Start or stop the Python server</digest>
-			<description>
-				Send <m>server 1</m> to launch the Python server using the command set via <m>set_command</m>.
-				The external will automatically send <m>load_model</m> once the server reports ready.
-				Send <m>server 0</m> to stop the server.
-			</description>
-		</method>
-
-		<method name="set_command">
-			<arglist>
-				<arg name="command" type="list" optional="0" />
-			</arglist>
-			<digest>Set the shell command used to launch the Python server</digest>
-			<description>
-				Example: <m>set_command python server.py --server_ip 192.168.1.100</m>
-			</description>
-		</method>
-
-		<method name="load_model">
-			<digest>Manually send the load model command to the Python server</digest>
-		</method>
-
 		<method name="predict">
-			<digest>Manually trigger a prediction on the Python server</digest>
+			<arglist>
+				<arg name="curr" type="int" optional="0" />
+			</arglist>
+			<digest>Trigger a prediction at the given cursor position (in samples)</digest>
+			<description>
+				Reads p*T samples of context from [curr - p*T → curr] in the buffer,
+				sends them to the Python server, waits for the prediction, and writes
+				the result back to [curr + w*p*T → curr + (w+1)*p*T].
+				A bang is output when the write is complete.
+				Prediction is skipped if curr = 0 (no past context available).
+			</description>
 		</method>
 
-		<method name="verbose">
+		<method name="set_buffer">
 			<arglist>
-				<arg name="state" type="int" optional="0" />
+				<arg name="buffer-name" type="symbol" optional="0" />
 			</arglist>
-			<digest>Enable or disable verbose logging and timing output</digest>
+			<digest>Bind to a multichannel buffer~ at runtime</digest>
 			<description>
-				When enabled (1), prints data import time, round-trip processing time,
-				packet test times, and network throughput to the Max console.
+				Binds the object to the named buffer~. The channel count is read
+				automatically and used as the stem count. Can also be set as the
+				first argument to the object box.
+			</description>
+		</method>
+
+		<method name="T">
+			<arglist>
+				<arg name="samples" type="int" optional="0" />
+			</arglist>
+			<digest>Set the model context window size in samples</digest>
+			<description>
+				T is the full receptive field of the neural network model (e.g. 264600
+				for 6 seconds at 44100 Hz). Must be set before the first predict call.
+			</description>
+		</method>
+
+		<method name="fade">
+			<arglist>
+				<arg name="samples" type="int" optional="0" />
+			</arglist>
+			<digest>Set the fade-in length in samples applied on buffer write-back</digest>
+			<description>
+				A linear fade-in of this many samples is applied at the start of the
+				write region, blending the new prediction with existing audio.
+				Set to 0 for hard replacement.
+			</description>
+		</method>
+
+		<method name="send_mode">
+			<arglist>
+				<arg name="mode" type="int" optional="0" />
+			</arglist>
+			<digest>Set context send mode: 0 = sum, 1 = separate channels</digest>
+			<description>
+				0 (sum): All channels except the target stem are summed into one
+				context plane before sending. Faster — sends 1/N the data.
+				1 (separate): Each non-target channel is sent as its own plane.
+				More flexible — allows models that take individual stems as input.
 			</description>
 		</method>
 
@@ -89,21 +108,26 @@
 			<arglist>
 				<arg name="value" type="float" optional="0" />
 			</arglist>
-			<digest>Set the processing percentage (0.0 – 1.0)</digest>
+			<digest>Set the prediction window as a fraction of T (0.0 – 1.0)</digest>
+			<description>
+				p controls the size of data exchanged per step: p*T samples are both
+				sent as context and received as prediction. Example: T=264600, p=0.25
+				gives a 66150-sample (1.5s) prediction window per step.
+			</description>
 		</method>
 
 		<method name="pr_win_mul">
 			<arglist>
 				<arg name="value" type="float" optional="0" />
 			</arglist>
-			<digest>Set the processing window multiplier (0.0 – 2.0)</digest>
-		</method>
-
-		<method name="packet_size">
-			<arglist>
-				<arg name="size" type="int" optional="0" />
-			</arglist>
-			<digest>Set the OSC packet size in floats (128 – 16384, default: 10240)</digest>
+			<digest>Set the window slot: -1, 0, or 1 (write position relative to cursor)</digest>
+			<description>
+				w determines where the prediction is written relative to the cursor:
+				-1 = one prediction window before cursor,
+				 0 = at cursor,
+				 1 = one prediction window after cursor.
+				Write region = [curr + w*p*T → curr + (w+1)*p*T].
+			</description>
 		</method>
 
 		<method name="predict_instruments">
@@ -113,27 +137,83 @@
 				<arg name="guitar" type="int" optional="0" />
 				<arg name="piano" type="int" optional="0" />
 			</arglist>
-			<digest>Tell the Python server which instruments to run inference on (1 = yes, 0 = no)</digest>
+			<digest>Select which stems the server should predict (1 = yes, 0 = pass through)</digest>
 			<description>
-				Send a list of four 0s and 1s — one per instrument in order: bass drums guitar piano.
-				1 means run inference for that instrument, 0 means skip it.
-				Example: <m>predict_instruments 1 1 0 0</m> runs inference for bass and drums only.
-				The selection is sent to the Python server over OSC.
+				Tells the Python server which stems to run inference on. Context sent
+				is all other buffer channels (summed or separate per send_mode).
+				Example: <m>predict_instruments 1 0 0 0</m> predicts bass only.
+				Accepts 1–4 arguments; unspecified stems default to 0.
 			</description>
 		</method>
 
-		<method name="read_instruments">
+		<method name="server">
 			<arglist>
-				<arg name="bass" type="int" optional="0" />
-				<arg name="drums" type="int" optional="0" />
-				<arg name="guitar" type="int" optional="0" />
-				<arg name="piano" type="int" optional="0" />
+				<arg name="state" type="int" optional="0" />
 			</arglist>
-			<digest>Select which planes of the input Jitter matrix to read (1 = yes, 0 = no)</digest>
+			<digest>Start (1) or stop (0) the Python server</digest>
 			<description>
-				Send a list of four 0s and 1s — one per instrument in order: bass drums guitar piano.
-				1 means read that instrument's plane from the input Jitter matrix, 0 means skip it.
-				Example: <m>read_instruments 1 1 0 0</m> reads only the bass and drums planes.
+				Launches the server using the command set via <m>set_command</m>.
+				The model is loaded automatically once the server reports ready.
+			</description>
+		</method>
+
+		<method name="set_command">
+			<arglist>
+				<arg name="command" type="list" optional="0" />
+			</arglist>
+			<digest>Set the shell command used to launch the Python server</digest>
+			<description>
+				Supports local commands and SSH remote commands. The server IP is
+				parsed automatically from --server_ip or ssh user@host.
+				Example: <m>set_command python server.py --server_ip 192.168.1.100</m>
+			</description>
+		</method>
+
+		<method name="load_model">
+			<digest>Push all parameters to the server and trigger model load</digest>
+			<description>
+				Sends packet_size, percentage, pr_win_mul, and predict_instruments
+				to the server, then sends the load_model command.
+				Called automatically after server startup.
+			</description>
+		</method>
+
+		<method name="packet_size">
+			<arglist>
+				<arg name="size" type="int" optional="0" />
+			</arglist>
+			<digest>Set the OSC chunk size in floats (128 – 16384, default: 10240)</digest>
+			<description>
+				Controls how many float values are packed into each UDP packet.
+				Smaller values reduce per-packet fragmentation risk over the internet.
+			</description>
+		</method>
+
+		<method name="verbose">
+			<arglist>
+				<arg name="state" type="int" optional="0" />
+			</arglist>
+			<digest>Enable (1) or disable (0) timing event log</digest>
+			<description>
+				When enabled, prints a timeline of events to the Max console:
+				[PREDICT] trigger timestamp,
+				[SEND] start and done times,
+				[RX] first chunk and complete times,
+				[WRITE] buffer write duration and total cycle time.
+			</description>
+		</method>
+
+		<method name="live_mode">
+			<arglist>
+				<arg name="mode" type="int" optional="0" />
+			</arglist>
+			<digest>Set cycling mode: 0 = normal, 1 = live/looping</digest>
+			<description>
+				In normal mode (0), prediction is skipped when curr=0 since there is no
+				past context available yet.
+				In live mode (1), curr=0 is treated as a buffer cycle point — the last
+				p*T samples of the buffer are used as context, allowing seamless
+				prediction across loop boundaries.
 			</description>
 		</method>
 
@@ -146,47 +226,49 @@
 		</method>
 
 		<method name="reset">
-			<digest>Reset all instrument indices</digest>
+			<digest>Send a reset command to the Python server</digest>
 		</method>
 
 		<method name="get_client_ip">
-			<digest>Fetch and display the client's public IP address</digest>
+			<digest>Fetch and display this machine's public IP address</digest>
 		</method>
 
 	</methodlist>
 
 	<misc name="Discussion">
+		<entry name="Buffer Coordinate System">
+			<description>
+				All positions are in samples. T is set once per session (matches model
+				input size). p and w can change between predictions. curr advances with
+				your playback cursor. The object handles clamping to buffer bounds.
+			</description>
+		</entry>
 		<entry name="Network Configuration">
 			<description>
 				Default ports: sender 7000, listener 8000.
-				The server IP is set via the --server_ip flag in <m>set_command</m>.
-				The client IP is auto-detected via api.ipify.org.
+				Receive buffer is 4 MB to handle bursts of prediction chunks.
+				For remote servers, smaller packet_size values reduce fragmentation risk.
 			</description>
 		</entry>
 		<entry name="Python Server Protocol">
 			<description>
-				The server must send <m>/ready true</m> when ready, and <m>/server_predicted true</m>
-				when processing is complete. Audio results are returned as OSC messages
-				on /bass, /drums, /guitar, /piano with index and float array data.
+				The server sends /ready true when ready. Prediction results are returned
+				as OSC messages on /bass, /drums, /guitar, /piano carrying chunk_idx,
+				total_chunks, and float data. Completion is driven by chunk reassembly,
+				not by any separate signal from the server.
 			</description>
 		</entry>
 	</misc>
 
 	<attributelist>
-
 		<attribute name="verb" get="1" set="1" type="int" size="1">
-			<digest>Enable or disable verbose logging (0 = off, 1 = on)</digest>
-			<description>
-				When set to 1, prints timing and data flow information to the Max console,
-				including data import time, round-trip processing time, and network throughput.
-				Same as sending the <m>verbose</m> message.
-			</description>
+			<digest>Enable or disable verbose timing log (0 = off, 1 = on)</digest>
+			<description>Same as sending the <m>verbose</m> message.</description>
 		</attribute>
-
 	</attributelist>
 
 	<seealso>
-		<object name="jit.matrix" />
+		<object name="buffer~" />
 	</seealso>
 
 </c74object>
