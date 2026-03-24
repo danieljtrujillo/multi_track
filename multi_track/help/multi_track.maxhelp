@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 34.0, 76.0, 1285.0, 810.0 ],
+		"rect" : [ -1767.0, 123.0, 1135.0, 743.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -39,6 +39,18 @@
 		"subpatcher_template" : "",
 		"showontab" : 1,
 		"boxes" : [ 			{
+				"box" : 				{
+					"id" : "obj-15",
+					"maxclass" : "message",
+					"numinlets" : 2,
+					"numoutlets" : 1,
+					"outlettype" : [ "" ],
+					"patching_rect" : [ 473.0, 318.0, 59.0, 22.0 ],
+					"text" : "0.015625"
+				}
+
+			}
+, 			{
 				"box" : 				{
 					"fontsize" : 12.0,
 					"id" : "obj-9",
@@ -2175,7 +2187,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 561.7021484375, 1023.40423583984375, 50.0, 22.0 ],
-					"text" : "-3000."
+					"text" : "4500."
 				}
 
 			}
@@ -2223,7 +2235,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 541.041748046875, 1061.34619140625, 50.0, 22.0 ],
-					"text" : "0."
+					"text" : "4500."
 				}
 
 			}
@@ -2526,8 +2538,8 @@
 , 							{
 								"name" : "Default M4L",
 								"default" : 								{
-									"fontsize" : [ 11.0 ],
 									"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+									"fontsize" : [ 11.0 ],
 									"fontname" : [ "Arial Bold" ]
 								}
 ,
@@ -2537,8 +2549,8 @@
 , 							{
 								"name" : "Default M4L Poletti",
 								"default" : 								{
-									"fontsize" : [ 10.0 ],
 									"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+									"fontsize" : [ 10.0 ],
 									"fontname" : [ "Arial Bold" ]
 								}
 ,
@@ -2548,7 +2560,6 @@
 , 							{
 								"name" : "Default M4L-1",
 								"default" : 								{
-									"fontsize" : [ 11.0 ],
 									"bgfillcolor" : 									{
 										"angle" : 270.0,
 										"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -2558,6 +2569,7 @@
 										"type" : "gradient"
 									}
 ,
+									"fontsize" : [ 11.0 ],
 									"fontname" : [ "Arial" ],
 									"fontface" : [ 1 ]
 								}
@@ -2613,7 +2625,6 @@
 , 							{
 								"name" : "jbb",
 								"default" : 								{
-									"fontsize" : [ 9.0 ],
 									"bgfillcolor" : 									{
 										"angle" : 270.0,
 										"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -2623,6 +2634,7 @@
 										"type" : "gradient"
 									}
 ,
+									"fontsize" : [ 9.0 ],
 									"fontname" : [ "Arial" ]
 								}
 ,
@@ -2641,8 +2653,8 @@
 , 							{
 								"name" : "karchkha1",
 								"default" : 								{
-									"fontsize" : [ 20.0 ],
 									"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ],
+									"fontsize" : [ 20.0 ],
 									"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ]
 								}
 ,
@@ -3228,7 +3240,7 @@
 					"maxclass" : "comment",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 476.356475830078125, 359.1439208984375, 69.812522888183594, 55.0 ],
+					"patching_rect" : [ 492.20623779296875, 355.72943115234375, 69.812522888183594, 55.0 ],
 					"text" : "inpaint win_ratio"
 				}
 
@@ -3241,7 +3253,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 42.210010528564453, 652.03765869140625, 50.0, 22.0 ],
-					"text" : "124"
+					"text" : "5"
 				}
 
 			}
@@ -3325,7 +3337,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 377.130615234375, 767.64990234375, 69.277107238769531, 22.0 ],
-					"text" : "66150."
+					"text" : "396900."
 				}
 
 			}
@@ -3469,7 +3481,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 772.99517822265625, 995.43804931640625, 93.617019653320313, 22.0 ],
-					"text" : "0."
+					"text" : "7500."
 				}
 
 			}
@@ -4266,7 +4278,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 255.860763549804688, 331.72943115234375, 103.0, 22.0 ],
+					"patching_rect" : [ 260.057281494140625, 326.72943115234375, 103.0, 22.0 ],
 					"text" : "loadmess 264600"
 				}
 
@@ -4523,7 +4535,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 928.01910400390625, 995.43804931640625, 93.617019653320313, 22.0 ],
-					"text" : "1499.977324"
+					"text" : "8999.977324"
 				}
 
 			}
@@ -4862,8 +4874,8 @@
 						"basictuning" : 440,
 						"followglobaltempo" : 0,
 						"formantcorrection" : 0,
-						"loopend" : [ 6000.0, "ms" ],
-						"loopstart" : [ 0.0, "ms" ],
+						"loopend" : [ 10500.0, "ms" ],
+						"loopstart" : [ 4500.0, "ms" ],
 						"mode" : "basic",
 						"originallength" : [ 0.0, "ticks" ],
 						"originaltempo" : 120.0,
@@ -6170,6 +6182,13 @@
 				"patchline" : 				{
 					"destination" : [ "obj-431", 0 ],
 					"source" : [ "obj-148", 0 ]
+				}
+
+			}
+, 			{
+				"patchline" : 				{
+					"destination" : [ "obj-16", 0 ],
+					"source" : [ "obj-15", 0 ]
 				}
 
 			}
@@ -8438,7 +8457,7 @@
 , 			{
 				"patchline" : 				{
 					"destination" : [ "obj-211", 0 ],
-					"midpoints" : [ 300.532623291015625, 378.0, 342.0, 378.0, 342.0, 360.0, 462.0, 360.0, 462.0, 447.0, 636.0, 447.0, 636.0, 492.0, 648.0, 492.0, 648.0, 519.0, 735.0, 519.0, 735.0, 648.0, 732.79443359375, 648.0 ],
+					"midpoints" : [ 300.532623291015625, 378.0, 342.0, 378.0, 342.0, 360.0, 462.0, 360.0, 462.0, 489.0, 636.0, 489.0, 636.0, 492.0, 648.0, 492.0, 648.0, 519.0, 735.0, 519.0, 735.0, 648.0, 732.79443359375, 648.0 ],
 					"source" : [ "obj-45", 1 ]
 				}
 
@@ -8955,13 +8974,13 @@
  ],
 		"parameters" : 		{
 			"obj-183" : [ "live.gain~[7]", "live.gain~", 0 ],
-			"obj-34" : [ "live.gain~", "live.gain~", 0 ],
 			"obj-158" : [ "live.gain~[4]", "live.gain~", 0 ],
 			"obj-210" : [ "textbutton[1]", "textbutton", 0 ],
 			"obj-302" : [ "textbutton[2]", "textbutton", 0 ],
-			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
 			"obj-173" : [ "live.gain~[6]", "live.gain~", 0 ],
 			"obj-172" : [ "live.gain~[5]", "live.gain~", 0 ],
+			"obj-34" : [ "live.gain~", "live.gain~", 0 ],
+			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
 			"parameterbanks" : 			{
 
 			}
@@ -9025,8 +9044,8 @@
 , 			{
 				"name" : "Default M4L",
 				"default" : 				{
-					"fontsize" : [ 11.0 ],
 					"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+					"fontsize" : [ 11.0 ],
 					"fontname" : [ "Arial Bold" ]
 				}
 ,
@@ -9036,8 +9055,8 @@
 , 			{
 				"name" : "Default M4L Poletti",
 				"default" : 				{
-					"fontsize" : [ 10.0 ],
 					"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+					"fontsize" : [ 10.0 ],
 					"fontname" : [ "Arial Bold" ]
 				}
 ,
@@ -9047,7 +9066,6 @@
 , 			{
 				"name" : "Default M4L-1",
 				"default" : 				{
-					"fontsize" : [ 11.0 ],
 					"bgfillcolor" : 					{
 						"angle" : 270.0,
 						"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -9057,6 +9075,7 @@
 						"type" : "gradient"
 					}
 ,
+					"fontsize" : [ 11.0 ],
 					"fontname" : [ "Arial" ],
 					"fontface" : [ 1 ]
 				}
@@ -9112,7 +9131,6 @@
 , 			{
 				"name" : "jbb",
 				"default" : 				{
-					"fontsize" : [ 9.0 ],
 					"bgfillcolor" : 					{
 						"angle" : 270.0,
 						"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -9122,6 +9140,7 @@
 						"type" : "gradient"
 					}
 ,
+					"fontsize" : [ 9.0 ],
 					"fontname" : [ "Arial" ]
 				}
 ,
@@ -9140,8 +9159,8 @@
 , 			{
 				"name" : "karchkha1",
 				"default" : 				{
-					"fontsize" : [ 20.0 ],
 					"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ],
+					"fontsize" : [ 20.0 ],
 					"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ]
 				}
 ,
