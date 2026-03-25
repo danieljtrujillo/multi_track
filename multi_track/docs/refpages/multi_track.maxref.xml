@@ -21,9 +21,20 @@
 		<objarg name="buffer-name" type="symbol" optional="1">
 			<digest>Name of the multichannel buffer~ to read from and write to</digest>
 			<description>
-				Pass the buffer name as the first argument: <o>multi_track mybuffer</o>.
-				The number of channels in the buffer determines the number of stems.
+				Pass the buffer name as the first argument, followed by stem names:
+				<o>multi_track mybuffer bass drums guitar piano</o>.
+				Stem names must match the channel count of the buffer.
 				Can also be set at runtime via the <m>set_buffer</m> message.
+				Max attribute arguments (e.g. @verb 1) may follow the stem names.
+			</description>
+		</objarg>
+		<objarg name="stem-names" type="list" optional="1">
+			<digest>Ordered stem names matching buffer channels (e.g. bass drums guitar piano)</digest>
+			<description>
+				One symbol per buffer channel. Used to label stems in the console,
+				match incoming prediction OSC addresses, and name outgoing context planes
+				in send_mode 1. Stop parsing at the first @ attribute argument.
+				Example: <o>multi_track mybuf bass drums guitar piano @verb 1</o>
 			</description>
 		</objarg>
 	</objarglist>
@@ -59,12 +70,15 @@
 		<method name="set_buffer">
 			<arglist>
 				<arg name="buffer-name" type="symbol" optional="0" />
+				<arg name="stem-names" type="list" optional="1" />
 			</arglist>
-			<digest>Bind to a multichannel buffer~ at runtime</digest>
+			<digest>Bind to a multichannel buffer~ and optionally name the stems</digest>
 			<description>
-				Binds the object to the named buffer~. The channel count is read
-				automatically and used as the stem count. Can also be set as the
-				first argument to the object box.
+				Binds the object to the named buffer~. Optionally, pass one symbol per
+				channel after the buffer name to label the stems:
+				<m>set_buffer mybuf bass drums guitar piano</m>.
+				Stem names must match the buffer channel count, otherwise a warning is posted.
+				If no names are given, stems are referred to as ch0, ch1, etc.
 			</description>
 		</method>
 
@@ -81,13 +95,14 @@
 
 		<method name="fade">
 			<arglist>
-				<arg name="samples" type="int" optional="0" />
+				<arg name="ratio" type="float" optional="0" />
 			</arglist>
-			<digest>Set the fade-in length in samples applied on buffer write-back</digest>
+			<digest>Set the crossfade overlap as a fraction of the sample rate (e.g. 0.02)</digest>
 			<description>
-				A linear fade-in of this many samples is applied at the start of the
-				write region, blending the new prediction with existing audio.
-				Set to 0 for hard replacement.
+				A linear crossfade of ratio * samplerate samples is applied at the start
+				of the write region, blending the new prediction with the existing audio.
+				Example: 0.02 at 44100 Hz gives ~882 samples of crossfade.
+				Set to 0.0 for hard replacement. Synced to the server on load_model.
 			</description>
 		</method>
 
@@ -95,11 +110,12 @@
 			<arglist>
 				<arg name="mode" type="int" optional="0" />
 			</arglist>
-			<digest>Set context send mode: 0 = sum, 1 = separate channels</digest>
+			<digest>Set context send mode: 0 = sum to /context, 1 = separate stems by name</digest>
 			<description>
-				0 (sum): All channels except the target stem are summed into one
-				context plane before sending. Faster — sends 1/N the data.
-				1 (separate): Each non-target channel is sent as its own plane.
+				0 (sum): All non-predicted channels are summed into one plane and sent
+				as /context. Faster — sends 1/N the data.
+				1 (separate): Each non-predicted channel is sent as its own plane using
+				the stem name as the OSC address (e.g. /bass, /drums).
 				More flexible — allows models that take individual stems as input.
 			</description>
 		</method>
@@ -132,17 +148,15 @@
 
 		<method name="predict_instruments">
 			<arglist>
-				<arg name="bass" type="int" optional="0" />
-				<arg name="drums" type="int" optional="0" />
-				<arg name="guitar" type="int" optional="0" />
-				<arg name="piano" type="int" optional="0" />
+				<arg name="flags" type="list" optional="0" />
 			</arglist>
-			<digest>Select which stems the server should predict (1 = yes, 0 = pass through)</digest>
+			<digest>One-hot vector selecting which stems to predict (1 = predict, 0 = pass through)</digest>
 			<description>
-				Tells the Python server which stems to run inference on. Context sent
-				is all other buffer channels (summed or separate per send_mode).
-				Example: <m>predict_instruments 1 0 0 0</m> predicts bass only.
-				Accepts 1–4 arguments; unspecified stems default to 0.
+				Sends one integer flag per stem (in the order defined by set_buffer).
+				The server generates only the stems with flag = 1; the others are
+				passed through unchanged. Number of flags must match the stem count.
+				Example with 4 stems: <m>predict_instruments 1 0 0 0</m> predicts
+				the first stem only.
 			</description>
 		</method>
 
@@ -253,9 +267,11 @@
 		<entry name="Python Server Protocol">
 			<description>
 				The server sends /ready true when ready. Prediction results are returned
-				as OSC messages on /bass, /drums, /guitar, /piano carrying chunk_idx,
-				total_chunks, and float data. Completion is driven by chunk reassembly,
-				not by any separate signal from the server.
+				as OSC messages addressed by stem name (e.g. /bass, /drums) carrying
+				chunk_idx, total_chunks, and float data. The stem names on the server
+				are configured in server.py and must match the names given to set_buffer.
+				Completion is driven by chunk reassembly, not by any separate signal.
+				The server ignores all OSC messages while a model is loading.
 			</description>
 		</entry>
 	</misc>

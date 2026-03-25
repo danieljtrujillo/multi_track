@@ -156,13 +156,15 @@ typedef struct _multi_track {
 	char client_ip[512] = { 0 }; // Public IP of this machine (sent to server as --client_ip)
 	char server_ip[512] = { 0 }; // Resolved IP of the server (used for OSC send)
 
-	int predict_flags[4];  // Per-stem: 1 = model predicts this stem, 0 = pass through
-	int live_mode;         // 0 = skip predict at curr=0, 1 = cycle (read tail of buffer)
+	static const int MAX_STEMS = 8;
+	int    predict_flags[MAX_STEMS];  // Per-stem: 1 = model predicts this stem, 0 = pass through
+	char   stem_names[MAX_STEMS][64]; // User-defined stem names (from set_buffer), e.g. "bass"
+	int    live_mode;                 // 0 = skip predict at curr=0, 1 = cycle (read tail of buffer)
 
 	// Buffer integration
 	t_buffer_ref* buffer_ref;   // Reference to the bound multichannel buffer~
 	t_symbol*     buffer_name;  // Name of the bound buffer~
-	int           num_stems;    // Number of stems = channel count of buffer (default 4)
+	int           num_stems;    // Number of stems = number of names given in set_buffer
 	int           send_mode;    // 0 = send summed context, 1 = send channels separately
 	long          T_samples;    // Context window size in samples
 	double        fade_ratio;   // Crossfade overlap as fraction of sampling rate (e.g. 0.02 = ~882 samples at 44100)
@@ -190,7 +192,7 @@ void		multi_track_set_percentage(t_multi_track* x, double percentage);
 void		multi_track_set_pr_win_mul(t_multi_track* x, double pr_win_mul);
 
 // Buffer integration
-void		multi_track_set_buffer(t_multi_track* x, t_symbol* s);
+void		multi_track_set_buffer(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
 void		multi_track_set_send_mode(t_multi_track* x, long mode);
 void		multi_track_set_T(t_multi_track* x, long T_samples);
 void		multi_track_set_fade(t_multi_track* x, double fade_ratio);
@@ -245,7 +247,7 @@ void ext_main(void* r)
 	class_addmethod(c, (method)multi_track_load_model,          "load_model",          0);
 
 	// Buffer integration
-	class_addmethod(c, (method)multi_track_set_buffer,          "set_buffer",          A_SYM,   0);
+	class_addmethod(c, (method)multi_track_set_buffer,          "set_buffer",          A_GIMME, 0);
 	class_addmethod(c, (method)multi_track_set_send_mode,       "send_mode",           A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_T,               "T",                   A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_fade,            "fade",                A_FLOAT, 0);
@@ -308,9 +310,14 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		x->curr         = 0;
 		x->live_mode    = 0;
 
+		for (int i = 0; i < x->MAX_STEMS; i++) {
+			x->predict_flags[i] = 0;
+			x->stem_names[i][0] = '\0';
+		}
+
 		// First argument is the buffer name: multi_track mybuffer
 		if (argc > 0 && atom_gettype(argv) == A_SYM)
-			multi_track_set_buffer(x, atom_getsym(argv));
+			multi_track_set_buffer(x, nullptr, argc, argv);
 
 		attr_args_process(x, argc, argv);
 
@@ -320,9 +327,6 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 
 		get_public_ip(x->client_ip, sizeof(x->client_ip));
 		post("Public IP: %s", x->client_ip);
-
-		for (int i = 0; i < 4; i++)
-			x->predict_flags[i] = 0;
 
 		x->auto_load_model_on_ready = false;
 	}
@@ -387,36 +391,57 @@ void multi_track_free(t_multi_track* x) {
  * Buffer integration — bind, configure, and predict
  **********************************************************************/
 
-void multi_track_set_buffer(t_multi_track* x, t_symbol* name) {
-	if (x->buffer_ref)
-		object_free(x->buffer_ref);
+void multi_track_set_buffer(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
+	if (argc < 1) { post("set_buffer: usage: set_buffer <bufname> [stem1 stem2 ...]"); return; }
+
+	t_symbol* name = atom_getsym(&argv[0]);
+	if (x->buffer_ref) object_free(x->buffer_ref);
 	x->buffer_name = name;
 	x->buffer_ref  = buffer_ref_new((t_object*)x, name);
 
-	// Read channel count from buffer and use it as num_stems
+	// Parse stem names — read consecutive symbol atoms after buffer name.
+	// Stop at first non-symbol or @ attribute argument.
+	int n = 0;
+	for (int i = 1; i < argc && n < x->MAX_STEMS; i++) {
+		if (atom_gettype(&argv[i]) != A_SYM) break;
+		const char* s = atom_getsym(&argv[i])->s_name;
+		if (s[0] == '@') break;  // rest are Max attribute args, not stem names
+		snprintf(x->stem_names[n], 64, "%s", s);
+		n++;
+	}
+	if (n > 0) x->num_stems = n;
+
+	// Validate against buffer channel count
 	t_buffer_obj* buf = buffer_ref_getobject(x->buffer_ref);
 	if (buf) {
-		x->num_stems = (int)buffer_getchannelcount(buf);
-		post("Buffer '%s' bound — %d channels / stems", name->s_name, x->num_stems);
-	} else {
-		post("Buffer '%s' bound (not yet loaded)", name->s_name);
+		int ch = (int)buffer_getchannelcount(buf);
+		if (x->num_stems > 0 && x->num_stems != ch)
+			object_error((t_object*)x, "%d stem names but buffer has %d channels — mismatch!", x->num_stems, ch);
+		else if (x->num_stems == 0)
+			x->num_stems = ch;
 	}
+	char stemlist[256] = "";
+	for (int i = 0; i < x->num_stems; i++) {
+		strncat(stemlist, x->stem_names[i], sizeof(stemlist) - strlen(stemlist) - 2);
+		if (i < x->num_stems - 1) strncat(stemlist, " ", sizeof(stemlist) - strlen(stemlist) - 1);
+	}
+	post("Buffer '%s' bound — %d stems: %s", name->s_name, x->num_stems, stemlist);
 }
 
 void multi_track_set_send_mode(t_multi_track* x, long mode) {
-	if (mode != 0 && mode != 1) { post("send_mode must be 0 (sum) or 1 (separate)"); return; }
+	if (mode != 0 && mode != 1) { object_error((t_object*)x, "send_mode must be 0 (sum) or 1 (separate)"); return; }
 	x->send_mode = (int)mode;
 	post("send_mode set to %s", mode == 0 ? "sum" : "separate");
 }
 
 void multi_track_set_T(t_multi_track* x, long T_samples) {
-	if (T_samples <= 0) { post("T must be > 0 samples"); return; }
+	if (T_samples <= 0) { object_error((t_object*)x, "T must be > 0 samples"); return; }
 	x->T_samples = T_samples;
 	post("T set to %ld samples", T_samples);
 }
 
 void multi_track_set_fade(t_multi_track* x, double ratio) {
-	if (ratio < 0.0 || ratio > 1.0) { post("fade ratio must be 0.0 – 1.0"); return; }
+	if (ratio < 0.0 || ratio > 1.0) { object_error((t_object*)x, "fade ratio must be 0.0 – 1.0"); return; }
 	x->fade_ratio = ratio;
 	post("fade ratio set to %f", ratio);
 
@@ -428,7 +453,7 @@ void multi_track_set_fade(t_multi_track* x, double ratio) {
 }
 
 void multi_track_set_live_mode(t_multi_track* x, long mode) {
-	if (mode != 0 && mode != 1) { post("live_mode must be 0 or 1"); return; }
+	if (mode != 0 && mode != 1) { object_error((t_object*)x, "live_mode must be 0 or 1"); return; }
 	x->live_mode = (int)mode;
 	post("live_mode set to %d (%s)", mode, mode ? "cycling" : "normal");
 }
@@ -502,12 +527,9 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	if (read_end > frames) read_end = frames;
 	long actual_T = read_end - read_start;
 
-	const char* stem_tags[4] = { "/bass", "/drums", "/guitar", "/piano" };
-	int num_stems = (channels < 4) ? channels : 4;
+	int num_stems = x->num_stems;
 
-	// Count how many planes we will send (depends on send_mode and predict_flags)
-	// In sum mode: one plane per target stem (sum of all other channels)
-	// In separate mode: one plane per non-target channel, per target stem
+	// Count planes: mode 0 = 1 plane per target (/context), mode 1 = 1 plane per non-target stem
 	int num_targets = 0;
 	for (int i = 0; i < num_stems; i++)
 		if (x->predict_flags[i]) num_targets++;
@@ -518,42 +540,39 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	int total_expected_chunks = num_planes * chunks_per_plane;
 	int batch_id = ++x->batch_id;
 
-	// Build context planes and send — one thread per target stem
 	std::vector<std::thread> threads;
-	threads.reserve(num_targets);
+	threads.reserve(num_planes);
 
 	for (int t = 0; t < num_stems; t++) {
 		if (!x->predict_flags[t]) continue;
 
 		if (x->send_mode == 0) {
-			// Sum all channels except target into one context plane
+			// Sum all non-predicted channels into one context plane, send as /context
 			std::vector<float> context(actual_T, 0.0f);
-			for (int c = 0; c < channels && c < 4; c++) {
-				if (c == t) continue;
-				for (long i = 0; i < actual_T; i++) {
-					long frame = read_start + i;
-					context[i] += samples[frame * channels + c];
-				}
+			for (int c = 0; c < num_stems && c < channels; c++) {
+				if (x->predict_flags[c]) continue;  // skip predicted stems
+				for (long i = 0; i < actual_T; i++)
+					context[i] += samples[(read_start + i) * channels + c];
 			}
-			// Copy so the thread owns the data
 			std::vector<float> plane_data = context;
-			threads.emplace_back([plane_data, t, &x, stem_tags, total_expected_chunks, batch_id]() mutable {
+			threads.emplace_back([plane_data, &x, total_expected_chunks, batch_id]() mutable {
 				send_float_plane(plane_data.data(), (int)plane_data.size(),
-					x->server_ip, x->PORT_SENDER, stem_tags[t],
+					x->server_ip, x->PORT_SENDER, "/context",
 					x->package_size, total_expected_chunks, batch_id);
 			});
 		} else {
-			// Send each non-target channel separately
-			for (int c = 0; c < channels && c < 4; c++) {
-				if (c == t) continue;
+			// Send each non-predicted channel separately under its stem name
+			for (int c = 0; c < num_stems && c < channels; c++) {
+				if (x->predict_flags[c]) continue;  // skip predicted stems
 				std::vector<float> plane_data(actual_T);
-				for (long i = 0; i < actual_T; i++) {
-					long frame = read_start + i;
-					plane_data[i] = samples[frame * channels + c];
-				}
-				threads.emplace_back([plane_data, t, &x, stem_tags, total_expected_chunks, batch_id]() mutable {
+				for (long i = 0; i < actual_T; i++)
+					plane_data[i] = samples[(read_start + i) * channels + c];
+				char addr[70];
+				snprintf(addr, sizeof(addr), "/%s", x->stem_names[c]);
+				std::string addr_str(addr);
+				threads.emplace_back([plane_data, addr_str, &x, total_expected_chunks, batch_id]() mutable {
 					send_float_plane(plane_data.data(), (int)plane_data.size(),
-						x->server_ip, x->PORT_SENDER, stem_tags[t],
+						x->server_ip, x->PORT_SENDER, addr_str.c_str(),
 						x->package_size, total_expected_chunks, batch_id);
 				});
 			}
@@ -597,7 +616,7 @@ void multi_track_predict(t_multi_track* x, long curr) {
 
 void multi_track_set_packet_size(t_multi_track* x, long new_size) {
 	if (new_size < 128 || new_size > 16384) {  // Limit range for safety
-		post("Invalid packet size. Choose between 128 and 16384 bytes.");
+		object_error((t_object*)x, "Invalid packet size. Choose between 128 and 16384 bytes.");
 		return;
 	}
 
@@ -620,7 +639,7 @@ void multi_track_set_packet_size(t_multi_track* x, long new_size) {
 
 void multi_track_set_percentage(t_multi_track* x, double new_percentage) {
 	if (new_percentage < 0.0 || new_percentage > 1.0) {
-		post("Invalid percentage. Choose a value between 0.0 and 1.0.");
+		object_error((t_object*)x, "Invalid percentage. Choose a value between 0.0 and 1.0.");
 		return;
 	}
 	x->percentage = new_percentage;
@@ -635,7 +654,7 @@ void multi_track_set_percentage(t_multi_track* x, double new_percentage) {
 
 void multi_track_set_pr_win_mul(t_multi_track* x, double new_pr_win_mul) {
 	if (new_pr_win_mul < 0.0 || new_pr_win_mul > 2.0) {
-		post("Invalid pr_win_mul. Choose a value between 0.0 and 2.0.");
+		object_error((t_object*)x, "Invalid pr_win_mul. Choose a value between 0.0 and 2.0.");
 		return;
 	}
 	x->pr_win_mul = new_pr_win_mul;
@@ -701,26 +720,34 @@ void multi_track_test_packet(t_multi_track* x) {
 
 
 
-// "predict_instruments 1 0 0 0" — which stems the server should predict (1=yes, 0=pass through).
-// Context sent is all other channels (summed or separate depending on send_mode).
-// Accepts up to 4 arguments; unspecified stems default to 0.
+// "predict_instruments 1 0 0 0" — one-hot vector: which stems the server should predict.
+// Length must match the number of stems declared in set_buffer.
+// Context sent is all non-predicted channels (summed or separate depending on send_mode).
 void multi_track_set_predict_instruments(t_multi_track* x, t_symbol* s, long argc, t_atom* argv) {
-	if (argc < 1 || argc > 4) {
-		post("Error: predict_instruments requires 1–4 arguments, got %ld", argc);
+	if (argc < 1 || argc > x->MAX_STEMS) {
+		object_error((t_object*)x, "predict_instruments requires 1–%d arguments, got %ld", x->MAX_STEMS, argc);
 		return;
 	}
-	for (int i = 0; i < 4; i++)
+	for (int i = 0; i < x->MAX_STEMS; i++)
 		x->predict_flags[i] = 0;
 	for (int i = 0; i < (int)argc; i++) {
 		int value = (int)atom_getlong(&argv[i]);
 		if (value != 0 && value != 1) {
-			post("Error: argument %d must be 0 or 1, got %d", i, value);
+			object_error((t_object*)x, "predict_instruments: argument %d must be 0 or 1, got %d", i, value);
 			return;
 		}
 		x->predict_flags[i] = value;
 	}
-	post("predict_instruments: bass=%d drums=%d guitar=%d piano=%d",
-		x->predict_flags[0], x->predict_flags[1], x->predict_flags[2], x->predict_flags[3]);
+	// Print flags with stem names if available
+	char flagstr[256] = "";
+	for (int i = 0; i < x->num_stems; i++) {
+		char name[16];
+		if (!x->stem_names[i][0]) snprintf(name, sizeof(name), "ch%d", i);
+		char tmp[80];
+		snprintf(tmp, sizeof(tmp), "%s=%d ", x->stem_names[i][0] ? x->stem_names[i] : name, x->predict_flags[i]);
+		strncat(flagstr, tmp, sizeof(flagstr) - strlen(flagstr) - 1);
+	}
+	post("predict_instruments: %s", flagstr);
 	multi_track_send_predict_instruments(x);
 }
 
@@ -729,10 +756,10 @@ void multi_track_send_predict_instruments(t_multi_track* x) {
 	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
 	char buffer[256];
 	osc::OutboundPacketStream p(buffer, 256);
-	p << osc::BeginMessage("/predict_instruments")
-		<< x->predict_flags[0] << x->predict_flags[1]
-		<< x->predict_flags[2] << x->predict_flags[3]
-		<< osc::EndMessage;
+	p << osc::BeginMessage("/predict_instruments");
+	for (int i = 0; i < x->num_stems; i++)
+		p << x->predict_flags[i];
+	p << osc::EndMessage;
 	transmitSocket.Send(p.Data(), p.Size());
 }
 
@@ -855,7 +882,7 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 		size_t cmd_len = strlen(x->command_str);
 
 		if (cmd_len + inject_len >= sizeof(x->command_str)) {
-			post("Warning: command too long to inject --client_ip; skipping injection.");
+			object_warn((t_object*)x, "command too long to inject --client_ip; skipping injection.");
 			post("Command set to: %s", x->command_str);
 			return;
 		}
@@ -878,7 +905,7 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 			post("Command set to: %s", x->command_str);
 		}
 		else {
-			post("Warning: command too long to append --client_ip; skipping injection.");
+			object_warn((t_object*)x, "command too long to append --client_ip; skipping injection.");
 			post("Command set to: %s", x->command_str);
 		}
 	}
@@ -1092,7 +1119,7 @@ void multi_track_load_model(t_multi_track* x) {
 void terminate_process_tree(DWORD process_id) {
 	HANDLE hSnapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
 	if (hSnapshot == INVALID_HANDLE_VALUE) {
-		post("Failed to create process snapshot.");
+		object_error((t_object*)nullptr, "Failed to create process snapshot.");
 		return;
 	}
 
@@ -1145,7 +1172,7 @@ void multi_track_server(t_multi_track* x, long command) {
 #endif
 
 		if (x->command_str[0] == '\0') {
-			post("Error: No command defined. Use 'set_command' to define the server command.");
+			object_error((t_object*)x, "No command defined. Use 'set_command' to define the server command.");
 			return;
 		}
 
@@ -1164,18 +1191,18 @@ void multi_track_server(t_multi_track* x, long command) {
 
 		HANDLE hJob = CreateJobObject(NULL, NULL);
 		if (hJob == NULL) {
-			post("Failed to create job object.");
+			object_error((t_object*)x, "Failed to create job object.");
 			return;
 		}
 
 		if (!CreateProcess(NULL, command_str, NULL, NULL, FALSE, CREATE_NEW_CONSOLE, NULL, NULL, &si, &pi)) {
-			post("Failed to start the server.");
+			object_error((t_object*)x, "Failed to start the server.");
 			CloseHandle(hJob);
 			return;
 		}
 
 		if (!AssignProcessToJobObject(hJob, pi.hProcess)) {
-			post("Failed to assign process to job object.");
+			object_error((t_object*)x, "Failed to assign process to job object.");
 			CloseHandle(hJob);
 			TerminateProcess(pi.hProcess, 0);
 			CloseHandle(pi.hProcess);
@@ -1207,7 +1234,7 @@ void multi_track_server(t_multi_track* x, long command) {
 			fclose(fp);
 			chmod(sh_path, 0755);
 		} else {
-			post("Failed to write server launch script.");
+			object_error((t_object*)x, "Failed to write server launch script.");
 			return;
 		}
 
@@ -1223,7 +1250,7 @@ void multi_track_server(t_multi_track* x, long command) {
 			fprintf(scpt, "return winID\n");
 			fclose(scpt);
 		} else {
-			post("Failed to write AppleScript.");
+			object_error((t_object*)x, "Failed to write AppleScript.");
 			return;
 		}
 
@@ -1238,7 +1265,7 @@ void multi_track_server(t_multi_track* x, long command) {
 			x->terminal_window_id = win_id;
 			post("Server terminal window ID: %d", win_id);
 		} else {
-			post("Failed to launch Terminal via osascript.");
+			object_error((t_object*)x, "Failed to launch Terminal via osascript.");
 			return;
 		}
 #endif
@@ -1256,7 +1283,7 @@ void multi_track_server(t_multi_track* x, long command) {
 					post("Stopping the server...");
 					if (x->server_job != NULL) {
 						if (!TerminateJobObject(x->server_job, 0))
-							post("Failed to terminate job object.");
+							object_warn((t_object*)x, "Failed to terminate job object.");
 						CloseHandle(x->server_job);
 						x->server_job = NULL;
 					}
@@ -1270,7 +1297,7 @@ void multi_track_server(t_multi_track* x, long command) {
 				}
 			}
 			else {
-				post("Failed to get exit code of the server process.");
+				object_warn((t_object*)x, "Failed to get exit code of the server process.");
 			}
 		}
 		else {
@@ -1383,7 +1410,7 @@ public:
 		int watchdog_gen = 0;  // incremented on reset; stale watchdogs self-cancel
 		std::chrono::high_resolution_clock::time_point first_chunk_time;
 	};
-	StemReassembly reassembly[4];  // [0]=bass [1]=drums [2]=guitar [3]=piano
+	StemReassembly reassembly[8];  // MAX_STEMS
 	std::mutex reassembly_mutex;
 
 	std::chrono::high_resolution_clock::time_point* packet_test_start_time;
@@ -1455,12 +1482,15 @@ public:
 			}
 
 			// Prediction data chunks — reassemble per stem then write to buffer
+			// Match incoming OSC address (e.g. "/bass") to channel index via stem_names
 			int stem_idx = -1;
-			if      (std::strcmp(m.AddressPattern(), "/bass")   == 0) stem_idx = 0;
-			else if (std::strcmp(m.AddressPattern(), "/drums")  == 0) stem_idx = 1;
-			else if (std::strcmp(m.AddressPattern(), "/guitar") == 0) stem_idx = 2;
-			else if (std::strcmp(m.AddressPattern(), "/piano")  == 0) stem_idx = 3;
-			else return;
+			const char* addr = m.AddressPattern();
+			for (int i = 0; i < multi_track_obj->num_stems; i++) {
+				char expected[70];
+				snprintf(expected, sizeof(expected), "/%s", multi_track_obj->stem_names[i]);
+				if (std::strcmp(addr, expected) == 0) { stem_idx = i; break; }
+			}
+			if (stem_idx < 0) return;
 
 			osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
 			osc::int32 chunk_idx, total_chunks;
@@ -1538,14 +1568,14 @@ public:
 
 				t_buffer_obj* buf = buffer_ref_getobject(*buffer_ref);
 				if (!buf) {
-					post("WARNING: buffer not available for write-back");
+					object_error((t_object*)multi_track_obj, "buffer not available for write-back");
 					out_tread_control->notify();
 					return;
 				}
 
 				float* samples = buffer_locksamples(buf);
 				if (!samples) {
-					post("WARNING: could not lock buffer samples");
+					object_error((t_object*)multi_track_obj, "could not lock buffer samples");
 					out_tread_control->notify();
 					return;
 				}
@@ -1616,7 +1646,7 @@ public:
 						std::lock_guard<std::mutex> lock(listener->reassembly_mutex);
 						auto& r = listener->reassembly[stem_idx];
 						if (r.watchdog_gen != watchdog_gen || r.received == 0) return;
-						post("WARNING: watchdog fired — missing %d/%d chunks for stem %d, flushing with zeros",
+						object_warn((t_object*)listener->multi_track_obj, "watchdog fired — missing %d/%d chunks for stem %d, flushing with zeros",
 							r.expected - r.received, r.expected, stem_idx);
 						flush_chunks = std::move(r.chunks);
 						r.chunks.clear();
@@ -1633,7 +1663,7 @@ public:
 
 		}
 		catch (osc::Exception& e) {
-			post("OSC parse error: %s", e.what());
+			object_error((t_object*)multi_track_obj, "OSC parse error: %s", e.what());
 		}
 	}
 
@@ -1775,7 +1805,7 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 		udpListener.run();
 	}
 	catch (const std::exception& e) {
-		post("Error starting OSC listener: %s", e.what());
+		object_error((t_object*)x, "Error starting OSC listener: %s", e.what());
 	}
 
 	return NULL;

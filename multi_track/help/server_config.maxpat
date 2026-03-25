@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ -1508.0, 127.0, 920.0, 396.0 ],
+		"rect" : [ -1520.0, 76.0, 974.0, 788.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -377,7 +377,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 991.0, 420.0, 90.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 82.688674926757813, 71.327430725097656, 22.0 ]
+					"presentation_rect" : [ 80.610618591308594, 60.091911315917969, 71.327430725097656, 22.0 ]
 				}
 
 			}
@@ -393,7 +393,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 415.0, 371.0, 52.0, 24.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 42.520530700683594, 71.327430725097656, 26.0 ],
+					"presentation_rect" : [ 80.610618591308594, 28.892375946044922, 71.327430725097656, 26.0 ],
 					"text" : "Local",
 					"textcolor" : [ 0.996078431372549, 0.996078431372549, 0.996078431372549, 1.0 ],
 					"texton" : "Remote",
@@ -413,7 +413,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 3.0, 7.0, 260.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 28.353973388671875, 8.0, 189.734512329101563, 22.0 ],
+					"presentation_rect" : [ 0.407077789306641, 4.860986232757568, 189.734512329101563, 22.0 ],
 					"text" : "SERVER CONFIGURATION"
 				}
 
@@ -427,7 +427,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 351.0, 392.0, 53.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 2.115044593811035, 44.0, 48.0, 20.0 ],
+					"presentation_rect" : [ 2.115044593811035, 31.892375946044922, 48.0, 20.0 ],
 					"text" : "Mode:"
 				}
 
@@ -441,7 +441,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 924.0, 420.0, 74.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 2.115044593811035, 81.168144226074219, 58.0, 20.0 ],
+					"presentation_rect" : [ 2.115044593811035, 60.091911315917969, 58.0, 20.0 ],
 					"text" : "Model:"
 				}
 
@@ -457,7 +457,7 @@
 					"patching_rect" : [ 561.0, 427.0, 123.0, 33.0 ],
 					"presentation" : 1,
 					"presentation_linecount" : 2,
-					"presentation_rect" : [ 2.115044593811035, 113.362831115722656, 63.0, 33.0 ],
+					"presentation_rect" : [ 2.115044593811035, 86.008567810058594, 63.0, 33.0 ],
 					"text" : "Project \nname/dir:"
 				}
 
@@ -472,7 +472,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 696.0, 420.0, 175.0, 23.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 118.88336181640625, 170.194671630859375, 25.0 ],
+					"presentation_rect" : [ 80.610618591308594, 90.008567810058594, 170.194671630859375, 25.0 ],
 					"text" : "musical-accompaniment-ldm"
 				}
 
@@ -486,7 +486,8 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 13.0, 227.0, 127.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 2.115044593811035, 156.90264892578125, 75.0, 20.0 ],
+					"presentation_linecount" : 2,
+					"presentation_rect" : [ 2.115044593811035, 122.373504638671875, 65.134529113769531, 33.0 ],
 					"text" : "Conda env:"
 				}
 
@@ -501,7 +502,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 147.0, 227.0, 78.0, 21.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 155.923187255859375, 130.0, 25.0 ],
+					"presentation_rect" : [ 80.610618591308594, 126.373504638671875, 130.0, 25.0 ],
 					"text" : "ctm_gen"
 				}
 
@@ -515,7 +516,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 769.0, 183.0, 98.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 2.115044593811035, 189.185836791992188, 77.0, 20.0 ],
+					"presentation_rect" : [ 2.115045070648193, 158.69256591796875, 77.0, 20.0 ],
 					"text" : "Server port:"
 				}
 
@@ -530,7 +531,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 867.0, 183.0, 80.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 190.706375122070313, 49.646015167236328, 22.0 ]
+					"presentation_rect" : [ 80.610618591308594, 158.69256591796875, 49.646015167236328, 22.0 ]
 				}
 
 			}
@@ -543,7 +544,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 957.0, 179.0, 97.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 2.115044593811035, 219.734512329101563, 77.0, 20.0 ],
+					"presentation_rect" : [ 2.115045070648193, 189.241241455078125, 77.0, 20.0 ],
 					"text" : "Client port:"
 				}
 
@@ -558,7 +559,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 1052.0, 176.0, 80.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 221.255050659179688, 50.0, 22.0 ]
+					"presentation_rect" : [ 80.610618591308594, 189.241241455078125, 50.0, 22.0 ]
 				}
 
 			}
@@ -571,7 +572,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 339.0, 48.0, 97.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 2.115044593811035, 254.92034912109375, 76.0, 20.0 ],
+					"presentation_rect" : [ 2.115046977996826, 215.906890869140625, 76.0, 20.0 ],
 					"text" : "user@host:"
 				}
 
@@ -586,7 +587,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 437.0, 46.0, 182.0, 24.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 256.440887451171875, 171.769882202148438, 25.0 ],
+					"presentation_rect" : [ 80.610618591308594, 217.42742919921875, 171.769882202148438, 25.0 ],
 					"text" : "karchkhadze@reach1.ircam.fr"
 				}
 
@@ -602,7 +603,7 @@
 					"patching_rect" : [ 348.0, 640.0, 106.0, 33.0 ],
 					"presentation" : 1,
 					"presentation_linecount" : 2,
-					"presentation_rect" : [ 2.115044593811035, 286.92034912109375, 90.0, 33.0 ],
+					"presentation_rect" : [ 2.115043878555298, 241.180435180664063, 90.0, 33.0 ],
 					"text" : "CUDA:\n-1 = 'cpu'"
 				}
 
@@ -618,7 +619,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 469.0, 639.0, 60.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 82.964584350585938, 293.940887451171875, 60.0, 22.0 ]
+					"presentation_rect" : [ 80.610618591308594, 248.200973510742188, 60.0, 22.0 ]
 				}
 
 			}
@@ -810,7 +811,7 @@
 , 			{
 				"box" : 				{
 					"angle" : 270.0,
-					"bgcolor" : [ 0.898039215686275, 0.474509803921569, 0.984313725490196, 1.0 ],
+					"bgcolor" : [ 0.752941176470588, 0.56078431372549, 0.792156862745098, 1.0 ],
 					"id" : "obj-55",
 					"maxclass" : "panel",
 					"mode" : 0,
@@ -818,7 +819,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 641.59100341796875, 698.228515625, 128.0, 128.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 0.407077789306641, -0.001607894897461, 258.088531494140625, 336.849578857421875 ],
+					"presentation_rect" : [ 0.407077789306641, -0.001607894897461, 258.088531494140625, 282.5894775390625 ],
 					"proportion" : 0.5
 				}
 
