@@ -46,9 +46,6 @@
 	</inletlist>
 
 	<outletlist>
-		<outlet id="0" type="bang">
-			<digest>Bang — fires when the predicted stem has been written to the buffer</digest>
-		</outlet>
 	</outletlist>
 
 	<methodlist>
@@ -60,10 +57,10 @@
 			<digest>Trigger a prediction at the given cursor position (in samples)</digest>
 			<description>
 				Reads p*T samples of context from [curr - p*T → curr] in the buffer,
-				sends them to the Python server, waits for the prediction, and writes
-				the result back to [curr + w*p*T → curr + (w+1)*p*T].
-				A bang is output when the write is complete.
-				Prediction is skipped if curr = 0 (no past context available).
+				sends them to the Python server, and writes prediction chunks directly
+				to [curr + w*p*T → curr + (w+1)*p*T] as they arrive.
+				The content zone is zeroed at predict time; the fade zone is kept for
+				crossfade blending. Prediction is skipped if curr = 0 (no past context available).
 			</description>
 		</method>
 

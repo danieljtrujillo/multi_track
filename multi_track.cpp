@@ -133,12 +133,23 @@ typedef struct _multi_track {
 	int PORT_LISTENER;
 
 	// Thread synchronisation
-	thread_control* out_tread_control;       // Signals that prediction write-back is complete
 	thread_control* server_control;          // Signals that server is ready
 	thread_control* python_import_control;   // Signals data import acknowledgement
 
-	// Single bang outlet: fires when prediction has been written to buffer
-	void* done_outlet;
+	// Write-state shared between predict() and the listener thread.
+	// Protected by write_state_mutex.
+	std::mutex* write_state_mutex;
+	long  ww_write_start;    // Start of write region (includes fade zone)
+	long  ww_content_start;  // Start of content zone (after fade)
+	long  ww_fade;           // Fade length in samples
+	int   chunks_received[8];  // Per-stem chunks received in last batch
+	int   chunks_expected[8];  // Per-stem chunks expected in last batch
+
+	// Previous batch write params — kept so the listener can accept responses that
+	// arrive one step late (e.g. when inference barely overshoots the step interval).
+	int   prev_batch_id;
+	long  prev_ww_write_start;
+	long  prev_ww_fade;
 
 	int package_size;  // Number of floats per OSC chunk sent to server
 
@@ -173,6 +184,7 @@ typedef struct _multi_track {
 	// High-resolution timestamps for end-to-end timing measurements
 	std::chrono::high_resolution_clock::time_point packet_test_start_time;
 	std::chrono::high_resolution_clock::time_point data_import_start_time;
+	std::chrono::high_resolution_clock::time_point prev_data_import_start_time;
 	std::chrono::high_resolution_clock::time_point data_import_end_time;
 
 	bool auto_load_model_on_ready;  // If true, call load_model as soon as /ready is received
@@ -295,14 +307,23 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 		x->PORT_LISTENER = 8000;
 
 		x->verbose_flag = 0;
-		x->batch_id = 0;
+		x->batch_id     = 0;
+		x->prev_batch_id = -1;
 
-		x->out_tread_control     = new thread_control;
 		x->server_control        = new thread_control;
 		x->python_import_control = new thread_control;
 
-		// Single outlet: bang when prediction has been written to buffer
-		x->done_outlet = bangout((t_object*)x);
+		// Write-state
+		x->write_state_mutex   = new std::mutex;
+		x->ww_write_start      = 0;
+		x->ww_content_start    = 0;
+		x->ww_fade             = 0;
+		x->prev_ww_write_start = 0;
+		x->prev_ww_fade        = 0;
+		for (int i = 0; i < x->MAX_STEMS; i++) {
+			x->chunks_received[i] = 0;
+			x->chunks_expected[i] = 0;
+		}
 
 		// Buffer integration — must be set via messages before predict is called
 		x->buffer_ref   = nullptr;  // checked before use
@@ -375,7 +396,7 @@ void multi_track_free(t_multi_track* x) {
 		object_free(x->buffer_ref);
 		x->buffer_ref = nullptr;
 	}
-	delete x->out_tread_control;
+	delete x->write_state_mutex;
 	delete x->server_control;
 	delete x->python_import_control;
 
@@ -463,7 +484,7 @@ void multi_track_set_live_mode(t_multi_track* x, long mode) {
 // Main predict entry point.
 // Reads context from buffer, sends to server as OSC chunks.
 // The server self-triggers inference once all chunks arrive, then sends predictions back.
-// The listener writes predictions directly into the buffer and bangs done_outlet.
+// The listener writes predictions directly into the buffer as each chunk arrives.
 void multi_track_predict(t_multi_track* x, long curr) {
 	if (!x->buffer_ref) {
 		object_error((t_object*)x, "No buffer bound. Use 'set_buffer <name>' first.");
@@ -480,7 +501,23 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	// In live_mode, curr=0 means buffer cycled — tail becomes context, so allow it.
 	if (curr == 0 && !x->live_mode) return;
 
+	// Check previous batch for missing/partial chunks before starting a new one.
+	{
+		std::lock_guard<std::mutex> lock(*x->write_state_mutex);
+		for (int i = 0; i < x->num_stems; i++) {
+			if (!x->predict_flags[i]) continue;
+			int recv = x->chunks_received[i];
+			int exp  = x->chunks_expected[i];
+			const char* name = x->stem_names[i][0] ? x->stem_names[i] : "?";
+			if (exp > 0 && recv == 0)
+				object_warn((t_object*)x, "stem '%s': no chunks received for batch %d", name, x->batch_id);
+			else if (exp > 0 && recv < exp)
+				object_warn((t_object*)x, "stem '%s': only %d/%d chunks received for batch %d", name, recv, exp, x->batch_id);
+		}
+	}
+
 	x->curr = curr;
+	x->prev_data_import_start_time = x->data_import_start_time;
 	x->data_import_start_time = std::chrono::high_resolution_clock::now();
 
 	if (x->verbose_flag) {
@@ -496,8 +533,8 @@ void multi_track_predict(t_multi_track* x, long curr) {
 		localtime_r(&now_t, &tm_buf);
 #endif
 		post("----------------------------------------");
-		post("[PREDICT] curr=%-8ld  %02d:%02d:%02d.%03lld",
-			curr, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, (long long)ms_part);
+		post("[PREDICT] batch=%-4d  curr=%-8ld  %02d:%02d:%02d.%03lld",
+			x->batch_id + 1, curr, tm_buf.tm_hour, tm_buf.tm_min, tm_buf.tm_sec, (long long)ms_part);
 	}
 
 	long T    = x->T_samples;
@@ -512,6 +549,43 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	}
 	long frames   = buffer_getframecount(buf);
 	int  channels = (int)buffer_getchannelcount(buf);
+
+	// Compute write-back region for listener
+	long fade_samples  = (long)(x->fade_ratio * buffer_getsamplerate(buf));
+	long content_start = curr + (long)(x->pr_win_mul * x->percentage * x->T_samples);
+	long write_start   = content_start - fade_samples;
+
+	// Zero the content zone for all predicted stems — the fade zone is left intact
+	// so the crossfade can still blend from existing audio.
+	for (long i = content_start; i < content_start + (long)(x->T_samples * x->percentage); i++) {
+		long wp = i;
+		if (wp >= frames) { if (x->live_mode) wp = wp % frames; else break; }
+		if (wp >= 0 && wp < frames) {
+			for (int s = 0; s < x->num_stems && s < channels; s++) {
+				if (x->predict_flags[s]) samples[wp * channels + s] = 0.0f;
+			}
+		}
+	}
+
+	// Store write params and start new batch (under mutex so listener sees a consistent snapshot)
+	int batch_id;
+	{
+		std::lock_guard<std::mutex> lock(*x->write_state_mutex);
+		// Save current params as "previous" before overwriting so the listener
+		// can still accept response chunks that arrive one step late.
+		x->prev_batch_id       = x->batch_id;
+		x->prev_ww_write_start = x->ww_write_start;
+		x->prev_ww_fade        = x->ww_fade;
+		x->ww_write_start   = write_start;
+		x->ww_content_start = content_start;
+		x->ww_fade          = fade_samples;
+		batch_id = ++x->batch_id;
+		for (int i = 0; i < x->MAX_STEMS; i++) {
+			x->chunks_received[i] = 0;
+			// -1 = sent to server, awaiting first chunk; 0 = not predicted this batch
+			x->chunks_expected[i] = x->predict_flags[i] ? -1 : 0;
+		}
+	}
 
 	// In live_mode at cycle point (curr=0): read the tail of the buffer as context.
 	// Normally: read the step samples immediately before the cursor.
@@ -538,7 +612,6 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	int num_planes = num_targets * planes_per_target;
 	int chunks_per_plane = ((int)actual_T + (int)x->package_size - 1) / (int)x->package_size;
 	int total_expected_chunks = num_planes * chunks_per_plane;
-	int batch_id = ++x->batch_id;
 
 	std::vector<std::thread> threads;
 	threads.reserve(num_planes);
@@ -582,7 +655,7 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	if (x->verbose_flag) {
 		double t_send_start = std::chrono::duration<double, std::milli>(
 			std::chrono::high_resolution_clock::now() - x->data_import_start_time).count();
-		post("[SEND]    start  +%.1f ms", t_send_start);
+		post("[SEND]    start  +%.1f ms  batch=%d", t_send_start, batch_id);
 	}
 
 	buffer_unlocksamples(buf);
@@ -598,11 +671,11 @@ void multi_track_predict(t_multi_track* x, long curr) {
 		std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
 		auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
 		std::tm _tm; localtime_s(&_tm, &_now_t);
-		post("[SEND]    done   +%.1f ms  (%d chunks)  %02d:%02d:%02d.%03lld",
-			t_send_done, total_expected_chunks, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
+		post("[SEND]    done   +%.1f ms  (%d chunks)  batch=%d  %02d:%02d:%02d.%03lld",
+			t_send_done, total_expected_chunks, batch_id, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
 	}
 	// Server self-triggers inference when it has received all expected chunks.
-	// Listener writes predictions back to buffer and bangs done_outlet.
+	// Listener writes predictions back to the buffer per-chunk as they arrive.
 }
 
 
@@ -1077,7 +1150,7 @@ void multi_track_assist(t_multi_track* x, void* b, long m, long a, char* s)
 	if (m == ASSIST_INLET)
 		sprintf(s, "Messages: predict <curr>, set_buffer <name>, T <n>, fade <n>, pr_win_mul <-1|0|1>, send_mode 0|1, ...");
 	else
-		sprintf(s, "bang — prediction written to buffer");
+		sprintf(s, "(no outlet)");
 }
 
 void multi_track_verbose(t_multi_track* x, long command) {
@@ -1386,35 +1459,24 @@ class multi_track_packetListener : public osc::OscPacketListener {
 
 public:
 
-	thread_control* out_tread_control;
 	thread_control* server_control;
 	thread_control* python_import_control;
 
-	// Bang outlet — fires when prediction has been written to buffer
-	void* done_outlet;
-
-	// Buffer write-back state (pointers into t_multi_track)
+	// Buffer reference for write-back
 	t_buffer_ref** buffer_ref;
-	long* curr;
-	long* T_samples;
-	double* fade_ratio;
-	double* percentage;
-	double* pr_win_mul;
-	int*    live_mode;
 
-	// Chunk reassembly — buffers incoming chunks per stem until all arrive, then outputs in order
-	struct StemReassembly {
-		std::vector<std::vector<float>> chunks;
-		int expected = 0;
-		int received = 0;
-		int watchdog_gen = 0;  // incremented on reset; stale watchdogs self-cancel
-		std::chrono::high_resolution_clock::time_point first_chunk_time;
+	// Per-stem write state — snapshotted on the first chunk of each batch
+	struct StemWriteState {
+		long write_start = 0;
+		long fade        = 0;
+		int  expected    = 0;
 	};
-	StemReassembly reassembly[8];  // MAX_STEMS
-	std::mutex reassembly_mutex;
+	StemWriteState stem_state[8];       // current batch
+	StemWriteState prev_stem_state[8];  // previous batch (late-by-one arrivals)
 
 	std::chrono::high_resolution_clock::time_point* packet_test_start_time;
 	std::chrono::high_resolution_clock::time_point* data_import_start_time;
+	std::chrono::high_resolution_clock::time_point* prev_data_import_start_time;
 	int* verbose_flag;
 	bool* auto_load_model_on_ready;
 	t_multi_track* multi_track_obj;
@@ -1481,184 +1543,129 @@ public:
 				post("========================================");
 			}
 
-			// Prediction data chunks — reassemble per stem then write to buffer
-			// Match incoming OSC address (e.g. "/bass") to channel index via stem_names
+			// Server signals it skipped this batch (was busy with previous inference)
+			if (std::strcmp(m.AddressPattern(), "/batch_dropped") == 0) {
+				osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
+				osc::int32 dropped_id;
+				args >> dropped_id;
+				object_error((t_object*)multi_track_obj,
+					"server dropped batch %d (was busy)", (int)dropped_id);
+				return;
+			}
+
+			// Prediction data chunks — write each chunk directly to buffer as it arrives.
+			// Match incoming OSC address (e.g. "/bass") to channel index via stem_names.
 			int stem_idx = -1;
 			const char* addr = m.AddressPattern();
 			for (int i = 0; i < multi_track_obj->num_stems; i++) {
-				char expected[70];
-				snprintf(expected, sizeof(expected), "/%s", multi_track_obj->stem_names[i]);
-				if (std::strcmp(addr, expected) == 0) { stem_idx = i; break; }
+				char expected_addr[70];
+				snprintf(expected_addr, sizeof(expected_addr), "/%s", multi_track_obj->stem_names[i]);
+				if (std::strcmp(addr, expected_addr) == 0) { stem_idx = i; break; }
 			}
 			if (stem_idx < 0) return;
 
 			osc::ReceivedMessageArgumentStream args = m.ArgumentStream();
-			osc::int32 chunk_idx, total_chunks;
-			args >> chunk_idx >> total_chunks;
+			osc::int32 incoming_batch_id, chunk_idx, total_chunks;
+			args >> incoming_batch_id >> chunk_idx >> total_chunks;
 
 			// Collect floats from this chunk
 			std::vector<float> chunk_data;
 			float value;
-			while (!args.Eos()) {
-				args >> value;
-				chunk_data.push_back(value);
-			}
+			while (!args.Eos()) { args >> value; chunk_data.push_back(value); }
 
-			// Store chunk and check if the transfer is complete
-			std::vector<std::vector<float>> chunks_to_output;
-			bool spawn_watchdog = false;
-			double watchdog_timeout_ms = 500.0;  // fallback when only 1 chunk received so far
-			int watchdog_gen = -1;
+			// Check batch: accept current or one-step-late; reject anything older
+			bool is_current = false, is_prev = false;
 			{
-				std::lock_guard<std::mutex> lock(reassembly_mutex);
-				auto& r = reassembly[stem_idx];
+				std::lock_guard<std::mutex> lock(*multi_track_obj->write_state_mutex);
+				is_current = ((int)incoming_batch_id == multi_track_obj->batch_id);
+				is_prev    = ((int)incoming_batch_id == multi_track_obj->prev_batch_id);
 
-				// Reset state on first chunk or if total_chunks changed (new transfer)
-				if (chunk_idx == 0 || (int)r.chunks.size() != total_chunks) {
-					r.chunks.assign(total_chunks, {});
-					r.expected = total_chunks;
-					r.received = 0;
-					r.first_chunk_time = std::chrono::high_resolution_clock::now();
-					if (*verbose_flag) {
+				if (!is_current && !is_prev) {
+					object_error((t_object*)multi_track_obj,
+						"[RX] late chunk ignored — batch %d (current %d, stem %s)",
+						(int)incoming_batch_id, multi_track_obj->batch_id, addr);
+					return;
+				}
+				if (chunk_idx == 0) {
+					StemWriteState& ss_target = is_current ? stem_state[stem_idx] : prev_stem_state[stem_idx];
+					ss_target.write_start = is_current ? multi_track_obj->ww_write_start
+					                                   : multi_track_obj->prev_ww_write_start;
+					ss_target.fade        = is_current ? multi_track_obj->ww_fade
+					                                   : multi_track_obj->prev_ww_fade;
+					ss_target.expected    = (int)total_chunks;
+					if (is_current)
+						multi_track_obj->chunks_expected[stem_idx] = (int)total_chunks;
+					{
 						double t_rx_first = std::chrono::duration<double, std::milli>(
-							r.first_chunk_time - *data_import_start_time).count();
+							std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
 						auto _now_sys = std::chrono::system_clock::now();
 						std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
 						auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
 						std::tm _tm; localtime_s(&_tm, &_now_t);
-						post("[RX]      first  +%.1f ms  (%s)  %02d:%02d:%02d.%03lld",
-							t_rx_first, m.AddressPattern(), _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
+						if (is_current) {
+							if (*verbose_flag)
+								post("[RX]      first  +%.1f ms  (%s)  batch=%d  %02d:%02d:%02d.%03lld",
+									t_rx_first, addr, (int)incoming_batch_id, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
+						} else {
+							double t_inference = std::chrono::duration<double, std::milli>(
+								std::chrono::high_resolution_clock::now() - *prev_data_import_start_time).count();
+							object_warn((t_object*)multi_track_obj,
+								"[RX] late-1 accepted  +%.1fms inference  +%.1fms after curr-batch  (%s)  batch=%d  %02d:%02d:%02d.%03lld",
+								t_inference, t_rx_first, addr, (int)incoming_batch_id, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
+						}
 					}
-				}
-
-				if (chunk_idx < (int)r.chunks.size() && r.chunks[chunk_idx].empty()) {
-					r.chunks[chunk_idx] = std::move(chunk_data);
-					r.received++;
-				}
-
-				if (r.received >= r.expected) {
-					// All chunks arrived — move to output
-					chunks_to_output = std::move(r.chunks);
-					r.chunks.clear();
-					r.received = 0;
-					if (*verbose_flag) {
-						double t_rx_done = std::chrono::duration<double, std::milli>(
-							std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
-						post("[RX]      complete +%.1f ms  (%s, %d chunks)", t_rx_done, m.AddressPattern(), total_chunks);
-					}
-				} else {
-					// Reset adaptive watchdog on every chunk arrival.
-					// Timeout = avg inter-chunk interval × 5 (same formula as Python server).
-					r.watchdog_gen++;
-					if (r.received > 1) {
-						double span_ms = std::chrono::duration<double, std::milli>(
-							std::chrono::high_resolution_clock::now() - r.first_chunk_time).count();
-						watchdog_timeout_ms = (span_ms / (r.received - 1)) * 5.0;
-					}
-					watchdog_gen = r.watchdog_gen;
-					spawn_watchdog = true;
 				}
 			}
 
-			// Helper: write assembled chunks into the buffer at the correct position,
-			// apply fade-in, then bang done_outlet.
-			auto write_to_buffer = [this, stem_idx](std::vector<std::vector<float>>& chunks, bool is_flush) {
-				auto t_start = std::chrono::high_resolution_clock::now();
-				if (*verbose_flag && is_flush) post("[WRITE]   flush (stem %d, missing chunks filled with zeros)", stem_idx);
+			// Write chunk directly to buffer at its natural position
+			t_buffer_obj* buf = buffer_ref_getobject(*buffer_ref);
+			if (!buf) {
+				object_error((t_object*)multi_track_obj, "buffer not available for write-back");
+				return;
+			}
+			float* samples = buffer_locksamples(buf);
+			if (!samples) {
+				object_error((t_object*)multi_track_obj, "could not lock buffer samples");
+				return;
+			}
+			long frames   = buffer_getframecount(buf);
+			int  channels = (int)buffer_getchannelcount(buf);
 
-				t_buffer_obj* buf = buffer_ref_getobject(*buffer_ref);
-				if (!buf) {
-					object_error((t_object*)multi_track_obj, "buffer not available for write-back");
-					out_tread_control->notify();
-					return;
-				}
-
-				float* samples = buffer_locksamples(buf);
-				if (!samples) {
-					object_error((t_object*)multi_track_obj, "could not lock buffer samples");
-					out_tread_control->notify();
-					return;
-				}
-
-				long   frames       = buffer_getframecount(buf);
-				int    channels     = (int)buffer_getchannelcount(buf);
-				// Write position: curr + w*p*T → curr + (w+1)*p*T
-				// With crossfade: writing starts 'fade' samples early so the first
-				// 'fade' samples blend existing buffer content into the new prediction.
-				long   fade          = (long)(*fade_ratio * buffer_getsamplerate(buf));
-				long   content_start = *curr + (long)(*pr_win_mul * *percentage * *T_samples);
-				long   write_start   = content_start - fade;   // start fade samples before content
-				long   write_pos     = write_start;
-
-				for (auto& chunk : chunks) {
-					int n = chunk.empty() ? 1024 : (int)chunk.size();
-					for (int k = 0; k < n; k++) {
-						// In live_mode, wrap write position when it reaches end of buffer
-						long wp = (*live_mode && write_pos >= frames) ? write_pos % frames : write_pos;
-						if (wp >= 0 && wp < frames) {
-							float v = chunk.empty() ? 0.0f : chunk[k];
-							// Crossfade: blend existing → new over the first 'fade' samples
-							long offset = write_pos - write_start;
-							if (fade > 0 && offset < fade) {
-								float t = (float)offset / (float)fade;
-								float existing = samples[wp * channels + stem_idx];
-								v = existing * (1.0f - t) + v * t;
-							}
-							samples[wp * channels + stem_idx] = v;
-						}
-						write_pos++;
+			auto& ss      = is_current ? stem_state[stem_idx] : prev_stem_state[stem_idx];
+			long write_pos = ss.write_start + (long)chunk_idx * multi_track_obj->package_size;
+			for (int k = 0; k < (int)chunk_data.size(); k++) {
+				long wp = write_pos + k;
+				if (multi_track_obj->live_mode && wp >= frames) wp = wp % frames;
+				if (wp >= 0 && wp < frames) {
+					float v = chunk_data[k];
+					// Crossfade: blend existing → new over the first 'fade' samples
+					long offset = (write_pos + k) - ss.write_start;
+					if (ss.fade > 0 && offset < ss.fade) {
+						float t_blend = (float)offset / (float)ss.fade;
+						float existing = samples[wp * channels + stem_idx];
+						v = existing * (1.0f - t_blend) + v * t_blend;
 					}
+					samples[wp * channels + stem_idx] = v;
 				}
+			}
 
-				buffer_unlocksamples(buf);
-				buffer_setdirty(buf);
+			buffer_unlocksamples(buf);
+			buffer_setdirty(buf);
 
-				post("[WRITE] first_sample=%ld  last_sample=%ld  total=%ld  fade=%ld  content_start=%ld",
-					write_start, write_pos - 1, write_pos - write_start, fade, content_start);
-
-				if (*verbose_flag) {
-					auto t_now = std::chrono::high_resolution_clock::now();
-					double write_ms = std::chrono::duration<double, std::milli>(t_now - t_start).count();
-					double total_ms = std::chrono::duration<double, std::milli>(t_now - *data_import_start_time).count();
+			// Track received count; log on completion (only track current batch)
+			{
+				std::lock_guard<std::mutex> lock(*multi_track_obj->write_state_mutex);
+				if (is_current) multi_track_obj->chunks_received[stem_idx]++;
+				if (*verbose_flag && multi_track_obj->chunks_received[stem_idx] == ss.expected) {
+					double t_rx_done = std::chrono::duration<double, std::milli>(
+						std::chrono::high_resolution_clock::now() - *data_import_start_time).count();
 					auto _now_sys = std::chrono::system_clock::now();
 					std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
 					auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
 					std::tm _tm; localtime_s(&_tm, &_now_t);
-					post("[WRITE]   done   +%.1f ms  (write %.1f ms)  total: %.1f ms  %02d:%02d:%02d.%03lld",
-						total_ms, write_ms, total_ms, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
-					post("----------------------------------------");
+					post("[RX]      complete  +%.1f ms  (%s, %d chunks)  batch=%d  %02d:%02d:%02d.%03lld",
+						t_rx_done, addr, ss.expected, (int)incoming_batch_id, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
 				}
-
-				// Bang done outlet and signal output thread
-				outlet_bang(done_outlet);
-				out_tread_control->notify();
-			};
-
-			// Watchdog — fires if remaining chunks don't arrive within the adaptive timeout.
-			// Each chunk resets the watchdog via watchdog_gen; stale watchdogs self-cancel.
-			if (spawn_watchdog) {
-				auto* listener = this;
-				std::thread([listener, stem_idx, watchdog_gen, watchdog_timeout_ms, write_to_buffer]() {
-					std::this_thread::sleep_for(
-						std::chrono::duration<double, std::milli>(watchdog_timeout_ms));
-					std::vector<std::vector<float>> flush_chunks;
-					{
-						std::lock_guard<std::mutex> lock(listener->reassembly_mutex);
-						auto& r = listener->reassembly[stem_idx];
-						if (r.watchdog_gen != watchdog_gen || r.received == 0) return;
-						object_warn((t_object*)listener->multi_track_obj, "watchdog fired — missing %d/%d chunks for stem %d, flushing with zeros",
-							r.expected - r.received, r.expected, stem_idx);
-						flush_chunks = std::move(r.chunks);
-						r.chunks.clear();
-						r.received = 0;
-					}
-					write_to_buffer(flush_chunks, true);
-				}).detach();
-			}
-
-			// All chunks received — write to buffer in order, then signal done
-			if (!chunks_to_output.empty()) {
-				write_to_buffer(chunks_to_output, false);
 			}
 
 		}
@@ -1781,23 +1788,14 @@ void* multi_track_OSC_listener(t_multi_track* x, int argc, char* argv[]) {
 	try {
 		multi_track_packetListener listener;
 
-		// Buffer write-back
-		listener.done_outlet  = x->done_outlet;
-		listener.buffer_ref   = &x->buffer_ref;
-		listener.curr         = &x->curr;
-		listener.T_samples    = &x->T_samples;
-		listener.fade_ratio   = &x->fade_ratio;
-		listener.percentage   = &x->percentage;
-		listener.pr_win_mul   = &x->pr_win_mul;
-		listener.live_mode    = &x->live_mode;
-
+		listener.buffer_ref               = &x->buffer_ref;
 		listener.packet_test_start_time   = &x->packet_test_start_time;
-		listener.data_import_start_time   = &x->data_import_start_time;
+		listener.data_import_start_time      = &x->data_import_start_time;
+		listener.prev_data_import_start_time = &x->prev_data_import_start_time;
 		listener.verbose_flag             = &x->verbose_flag;
 		listener.auto_load_model_on_ready = &x->auto_load_model_on_ready;
 		listener.multi_track_obj          = x;
 
-		listener.out_tread_control     = x->out_tread_control;
 		listener.server_control        = x->server_control;
 		listener.python_import_control = x->python_import_control;
 
