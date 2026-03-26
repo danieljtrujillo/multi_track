@@ -227,6 +227,8 @@ void		multi_track_send_print(t_multi_track* x);
 void		multi_track_send_reset(t_multi_track* x);
 
 void		multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
+void		multi_track_set_port_sender(t_multi_track* x, long port);
+void		multi_track_set_port_listener(t_multi_track* x, long port);
 void		get_public_ip(char* ip_buffer, size_t buffer_size);
 void		multi_track_get_client_ip(t_multi_track* x);
 
@@ -273,6 +275,8 @@ void ext_main(void* r)
 	class_addmethod(c, (method)multi_track_set_w,      			"w",          A_FLOAT, 0);
 	class_addmethod(c, (method)multi_track_set_packet_size,     "packet_size",         A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_predict_instruments, "predict_instruments", A_GIMME, 0);
+	class_addmethod(c, (method)multi_track_set_port_sender,     "port_sender",         A_LONG,  0);
+	class_addmethod(c, (method)multi_track_set_port_listener,   "port_listener",       A_LONG,  0);
 
 	// Utility
 	class_addmethod(c, (method)multi_track_verbose,             "verbose",             A_LONG,  0);
@@ -741,6 +745,25 @@ void multi_track_set_w(t_multi_track* x, double new_w) {
 }
 
 
+void multi_track_set_port_sender(t_multi_track* x, long port) {
+	if (port < 1 || port > 65535) {
+		object_error((t_object*)x, "port_sender: invalid port %ld (must be 1–65535)", port);
+		return;
+	}
+	x->PORT_SENDER = (int)port;
+	post("port_sender → %d  (Max → server)", x->PORT_SENDER);
+}
+
+void multi_track_set_port_listener(t_multi_track* x, long port) {
+	if (port < 1 || port > 65535) {
+		object_error((t_object*)x, "port_listener: invalid port %ld (must be 1–65535)", port);
+		return;
+	}
+	x->PORT_LISTENER = (int)port;
+	post("port_listener → %d  (server → Max)", x->PORT_LISTENER);
+}
+
+
 void multi_track_test_packet(t_multi_track* x) {
 	// Only announce when verbose
 	if (x->verbose_flag) {
@@ -920,18 +943,35 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 		}
 	}
 
-	// 3) Refresh client IP (your get_public_ip now returns the public IP and logs both)
+	// 3) Parse --serverport and --clientport if present
+	x->PORT_SENDER   = 7000;
+	x->PORT_LISTENER = 8000;
+	if (char* pf = strstr(x->command_str, "--serverport")) {
+		pf += strlen("--serverport");
+		while (*pf == ' ') pf++;
+		int p = atoi(pf);
+		if (p > 0 && p <= 65535) x->PORT_SENDER = p;
+	}
+	if (char* pf = strstr(x->command_str, "--clientport")) {
+		pf += strlen("--clientport");
+		while (*pf == ' ') pf++;
+		int p = atoi(pf);
+		if (p > 0 && p <= 65535) x->PORT_LISTENER = p;
+	}
+
+	// 4) Refresh client IP
 	get_public_ip(x->client_ip, sizeof(x->client_ip));
-	post("Server IP set to: %s", x->server_ip);
+	post("Server IP set to: %s  (sender port %d, listener port %d)",
+		x->server_ip, x->PORT_SENDER, x->PORT_LISTENER);
 	post("Client IP set automatically to: %s", x->client_ip);
 
-	// 4) If --client_ip already present anywhere, keep the command as-is
+	// 5) If --client_ip already present anywhere, keep the command as-is
 	if (strstr(x->command_str, "--client_ip") != NULL) {
 		post("Command set to: %s", x->command_str);
 		return;
 	}
 
-	// 5) Find the right injection point and insert --client_ip
+	// 6) Find the right injection point and insert --client_ip
 	// For local commands:  zsh -ic "... --clientport N"       → inject before last "
 	// For SSH commands:    ssh ... "bash -ic '... --clientport N'"  → inject before last '
 	// so the arg ends up inside the python command, not outside it.
@@ -968,7 +1008,7 @@ void multi_track_set_command(t_multi_track* x, t_symbol* s, long argc, t_atom* a
 		return;
 	}
 
-	// 6) Fallback: no double quotes found � append at end
+	// 7) Fallback: no double quotes found � append at end
 	{
 		char inject[128];
 		snprintf(inject, sizeof(inject), " --client_ip %s",

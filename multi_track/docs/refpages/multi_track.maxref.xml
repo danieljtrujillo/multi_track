@@ -201,6 +201,30 @@
 			</description>
 		</method>
 
+		<method name="port_sender">
+			<arglist>
+				<arg name="port" type="int" optional="0" />
+			</arglist>
+			<digest>Set the UDP port Max sends to (server listens on), default: 7000</digest>
+			<description>
+				Sets the port number used when sending OSC messages to the Python server.
+				Must match the --serverport argument passed to the server.
+				Can also be set automatically by including --serverport in the set_command string.
+			</description>
+		</method>
+
+		<method name="port_listener">
+			<arglist>
+				<arg name="port" type="int" optional="0" />
+			</arglist>
+			<digest>Set the UDP port Max listens on (server sends to), default: 8000</digest>
+			<description>
+				Sets the port number Max listens on for incoming prediction chunks and control messages from the server.
+				Must match the --clientport argument passed to the server.
+				Can also be set automatically by including --clientport in the set_command string.
+			</description>
+		</method>
+
 		<method name="verbose">
 			<arglist>
 				<arg name="state" type="int" optional="0" />
@@ -257,7 +281,9 @@
 		</entry>
 		<entry name="Network Configuration">
 			<description>
-				Default ports: sender 7000, listener 8000.
+				Default ports: sender 7000 (Max → server), listener 8000 (server → Max).
+				Ports can be changed via port_sender and port_listener messages, or set
+				automatically by including --serverport and --clientport in the set_command string.
 				Receive buffer is 4 MB to handle bursts of prediction chunks.
 				For remote servers, smaller packet_size values reduce fragmentation risk.
 			</description>
