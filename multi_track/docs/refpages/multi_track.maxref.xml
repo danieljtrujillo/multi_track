@@ -11,10 +11,10 @@
 
 		Buffer coordinate system:
 		T = context window size in samples (full model receptive field).
-		p = percentage — prediction window as a fraction of T.
-		w = pr_win_mul (-1, 0, 1) — which window slot to write into relative to cursor.
-		Read context: [curr - p*T → curr] (p*T samples before the cursor).
-		Write prediction: [curr + w*p*T → curr + (w+1)*p*T].
+		r = step ratio — fraction of T used as step size and prediction window (r*T samples).
+		w = window slot (-1, 0, 1) — which window slot to write into relative to cursor.
+		Read context: [curr - r*T → curr] (r*T samples before the cursor).
+		Write prediction: [curr + w*r*T → curr + (w+1)*r*T].
 	</description>
 
 	<objarglist>
@@ -41,7 +41,7 @@
 
 	<inletlist>
 		<inlet id="0" type="message">
-			<digest>Messages: predict, set_buffer, T, fade, send_mode, percentage, pr_win_mul, ...</digest>
+			<digest>Messages: predict, set_buffer, T, fade, send_mode, r, w, ...</digest>
 		</inlet>
 	</inletlist>
 
@@ -56,9 +56,9 @@
 			</arglist>
 			<digest>Trigger a prediction at the given cursor position (in samples)</digest>
 			<description>
-				Reads p*T samples of context from [curr - p*T → curr] in the buffer,
+				Reads r*T samples of context from [curr - r*T → curr] in the buffer,
 				sends them to the Python server, and writes prediction chunks directly
-				to [curr + w*p*T → curr + (w+1)*p*T] as they arrive.
+				to [curr + w*r*T → curr + (w+1)*r*T] as they arrive.
 				The content zone is zeroed at predict time; the fade zone is kept for
 				crossfade blending. Prediction is skipped if curr = 0 (no past context available).
 			</description>
@@ -117,21 +117,22 @@
 			</description>
 		</method>
 
-		<method name="percentage">
+		<method name="r">
 			<arglist>
 				<arg name="value" type="float" optional="0" />
 			</arglist>
-			<digest>Set the prediction window as a fraction of T (0.0 – 1.0)</digest>
+			<digest>Set the step ratio as a fraction of T (0.0 – 1.0)</digest>
 			<description>
-				p controls the size of data exchanged per step: p*T samples are both
-				sent as context and received as prediction. Example: T=264600, p=0.25
-				gives a 66150-sample (1.5s) prediction window per step.
+				r defines the fraction of the full model context length (T) that is used
+				as both the step size and the prediction window size. r*T samples are
+				sent as context and received as prediction per step.
+				Example: T=264600, r=0.25 gives a 66150-sample (1.5s) window per step.
 			</description>
 		</method>
 
-		<method name="pr_win_mul">
+		<method name="w">
 			<arglist>
-				<arg name="value" type="float" optional="0" />
+				<arg name="value" type="int" optional="0" />
 			</arglist>
 			<digest>Set the window slot: -1, 0, or 1 (write position relative to cursor)</digest>
 			<description>
@@ -139,7 +140,7 @@
 				-1 = one prediction window before cursor,
 				 0 = at cursor,
 				 1 = one prediction window after cursor.
-				Write region = [curr + w*p*T → curr + (w+1)*p*T].
+				Write region = [curr + w*r*T → curr + (w+1)*r*T].
 			</description>
 		</method>
 
@@ -183,7 +184,7 @@
 		<method name="load_model">
 			<digest>Push all parameters to the server and trigger model load</digest>
 			<description>
-				Sends packet_size, percentage, pr_win_mul, and predict_instruments
+				Sends packet_size, r, w, and predict_instruments
 				to the server, then sends the load_model command.
 				Called automatically after server startup.
 			</description>
@@ -223,7 +224,7 @@
 				In normal mode (0), prediction is skipped when curr=0 since there is no
 				past context available yet.
 				In live mode (1), curr=0 is treated as a buffer cycle point — the last
-				p*T samples of the buffer are used as context, allowing seamless
+				r*T samples of the buffer are used as context, allowing seamless
 				prediction across loop boundaries.
 			</description>
 		</method>
@@ -250,7 +251,7 @@
 		<entry name="Buffer Coordinate System">
 			<description>
 				All positions are in samples. T is set once per session (matches model
-				input size). p and w can change between predictions. curr advances with
+				input size). r and w can change between predictions. curr advances with
 				your playback cursor. The object handles clamping to buffer bounds.
 			</description>
 		</entry>

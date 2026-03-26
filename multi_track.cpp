@@ -17,12 +17,12 @@
 
 	Buffer coordinate system:
 	  T           — context window size in samples (set via "T <n>")
-	  p           — predict window as fraction of T (set via "percentage <f>")
-	  w           — pr_win_mul: -1, 0, or 1 (set via "pr_win_mul <n>")
+	  p           — predict window as fraction of T (set via "r <f>")
+	  w           — w: -1, 0, or 1 (set via "w <n>")
 	  curr        — cursor position passed with each "predict" message
 	  fade        — fade-in length in samples applied on write-back (set via "fade <n>")
 	  Read from:  curr → curr + T                        (full T-sample context, fixed)
-	  Write to:   curr + w*p*T → curr + (w+1)*p*T       (p*T-sample prediction window, with fade-in)
+	  Write to:   curr + w*r*T → curr + (w+1)*r*T       (r*T-sample prediction window, with fade-in)
 
 	Send modes (set via "send_mode 0|1"):
 	  0 = sum     — sum all channels except target into one context plane (fast, 1/N data)
@@ -119,8 +119,8 @@ typedef struct _multi_track {
 	t_object ob;
 
 	// Model parameters sent to the Python server on load_model
-	double percentage;
-	double pr_win_mul;
+	double r;
+	double w;
 
 	int verbose_flag;  // 1 = print timing and debug info to Max console
 	int batch_id;      // Incremented on each predict call so server can detect new batches
@@ -200,8 +200,8 @@ void		multi_track_free(t_multi_track* x);
 void		multi_track_load_model(t_multi_track* x);
 void		multi_track_server(t_multi_track* x, long command);
 void		multi_track_verbose(t_multi_track* x, long command);
-void		multi_track_set_percentage(t_multi_track* x, double percentage);
-void		multi_track_set_pr_win_mul(t_multi_track* x, double pr_win_mul);
+void		multi_track_set_r(t_multi_track* x, double r);
+void		multi_track_set_w(t_multi_track* x, double w);
 
 // Buffer integration
 void		multi_track_set_buffer(t_multi_track* x, t_symbol* s, long argc, t_atom* argv);
@@ -269,8 +269,8 @@ void ext_main(void* r)
 	class_addmethod(c, (method)multi_track_predict,             "predict",             A_LONG,  0);
 
 	// Model parameters (forwarded to Python server immediately)
-	class_addmethod(c, (method)multi_track_set_percentage,      "percentage",          A_FLOAT, 0);
-	class_addmethod(c, (method)multi_track_set_pr_win_mul,      "pr_win_mul",          A_FLOAT, 0);
+	class_addmethod(c, (method)multi_track_set_r,      			"r",          A_FLOAT, 0);
+	class_addmethod(c, (method)multi_track_set_w,      			"w",          A_FLOAT, 0);
 	class_addmethod(c, (method)multi_track_set_packet_size,     "packet_size",         A_LONG,  0);
 	class_addmethod(c, (method)multi_track_set_predict_instruments, "predict_instruments", A_GIMME, 0);
 
@@ -300,8 +300,8 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 	t_multi_track* x = (t_multi_track*)object_alloc(s_multi_track_class);
 
 	if (x) {
-		x->percentage = 0.0;
-		x->pr_win_mul = 0.0;
+		x->r = 0.0;
+		x->w = 0.0;
 
 		x->PORT_SENDER   = 7000;
 		x->PORT_LISTENER = 8000;
@@ -538,7 +538,7 @@ void multi_track_predict(t_multi_track* x, long curr) {
 	}
 
 	long T    = x->T_samples;
-	long step = (long)(T * x->percentage);  // p*T samples per step
+	long step = (long)(T * x->r);  // r*T samples per step
 
 	// In live_mode, curr=0 means the buffer just cycled — read the tail as context.
 	// In normal mode curr=0 is already guarded above.
@@ -552,12 +552,12 @@ void multi_track_predict(t_multi_track* x, long curr) {
 
 	// Compute write-back region for listener
 	long fade_samples  = (long)(x->fade_ratio * buffer_getsamplerate(buf));
-	long content_start = curr + (long)(x->pr_win_mul * x->percentage * x->T_samples);
+	long content_start = curr + (long)(x->w * x->r * x->T_samples);
 	long write_start   = content_start - fade_samples;
 
 	// Zero the content zone for all predicted stems — the fade zone is left intact
 	// so the crossfade can still blend from existing audio.
-	for (long i = content_start; i < content_start + (long)(x->T_samples * x->percentage); i++) {
+	for (long i = content_start; i < content_start + (long)(x->T_samples * x->r); i++) {
 		long wp = i;
 		if (wp >= frames) { if (x->live_mode) wp = wp % frames; else break; }
 		if (wp >= 0 && wp < frames) {
@@ -710,33 +710,33 @@ void multi_track_set_packet_size(t_multi_track* x, long new_size) {
 	post("Sent OSC message: /update_package_size with size %d", x->package_size);
 }
 
-void multi_track_set_percentage(t_multi_track* x, double new_percentage) {
-	if (new_percentage < 0.0 || new_percentage > 1.0) {
-		object_error((t_object*)x, "Invalid percentage. Choose a value between 0.0 and 1.0.");
+void multi_track_set_r(t_multi_track* x, double new_r) {
+	if (new_r < 0.0 || new_r > 1.0) {
+		object_error((t_object*)x, "Invalid r. Choose a value between 0.0 and 1.0.");
 		return;
 	}
-	x->percentage = new_percentage;
-	post("Percentage set to %f", x->percentage);
+	x->r = new_r;
+	post("r set to %f", x->r);
 
 	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
 	char buffer[256];
 	osc::OutboundPacketStream p(buffer, 256);
-	p << osc::BeginMessage("/update_percentage") << x->percentage << osc::EndMessage;
+	p << osc::BeginMessage("/update_r") << x->r << osc::EndMessage;
 	transmitSocket.Send(p.Data(), p.Size());
 }
 
-void multi_track_set_pr_win_mul(t_multi_track* x, double new_pr_win_mul) {
-	if (new_pr_win_mul < 0.0 || new_pr_win_mul > 2.0) {
-		object_error((t_object*)x, "Invalid pr_win_mul. Choose a value between 0.0 and 2.0.");
+void multi_track_set_w(t_multi_track* x, double new_w) {
+	if (new_w != -1.0 && new_w != 0.0 && new_w != 1.0) {
+		object_error((t_object*)x, "Invalid w. Must be -1, 0, or 1.");
 		return;
 	}
-	x->pr_win_mul = new_pr_win_mul;
-	post("pr_win_mul set to %f", x->pr_win_mul);
+	x->w = new_w;
+	post("w set to %f", x->w);
 
 	UdpTransmitSocket transmitSocket(IpEndpointName(x->server_ip, x->PORT_SENDER));
 	char buffer[256];
 	osc::OutboundPacketStream p(buffer, 256);
-	p << osc::BeginMessage("/pr_win_mul") << x->pr_win_mul << osc::EndMessage;
+	p << osc::BeginMessage("/w") << x->w << osc::EndMessage;
 	transmitSocket.Send(p.Data(), p.Size());
 }
 
@@ -1148,7 +1148,7 @@ void multi_track_get_client_ip(t_multi_track* x) {
 void multi_track_assist(t_multi_track* x, void* b, long m, long a, char* s)
 {
 	if (m == ASSIST_INLET)
-		sprintf(s, "Messages: predict <curr>, set_buffer <name>, T <n>, fade <n>, pr_win_mul <-1|0|1>, send_mode 0|1, ...");
+		sprintf(s, "Messages: predict <curr>, set_buffer <name>, T <n>, fade <n>, w <-1|0|1>, send_mode 0|1, ...");
 	else
 		sprintf(s, "(no outlet)");
 }
@@ -1172,12 +1172,14 @@ void multi_track_verbose(t_multi_track* x, long command) {
 // Pushes all current parameters to the server then triggers model load
 void multi_track_load_model(t_multi_track* x) {
 	post("Loading model...");
-	multi_track_set_packet_size(x, x->package_size);
-	multi_track_set_percentage(x, x->percentage);
-	multi_track_set_pr_win_mul(x, x->pr_win_mul);
-	multi_track_set_fade(x, x->fade_ratio);
-	multi_track_send_predict_instruments(x);
-	multi_track_verbose(x, x->verbose_flag);  // sync verbose state to server
+	// Small delays between UDP sends to prevent packet loss on remote connections
+	auto send_gap = []() { std::this_thread::sleep_for(std::chrono::milliseconds(30)); };
+	multi_track_set_packet_size(x, x->package_size);    send_gap();
+	multi_track_set_r(x, x->r);       send_gap();
+	multi_track_set_w(x, x->w);       send_gap();
+	multi_track_set_fade(x, x->fade_ratio);             send_gap();
+	multi_track_send_predict_instruments(x);            send_gap();
+	multi_track_verbose(x, x->verbose_flag);            send_gap();
 	multi_track_OSC_load_model(x);
 	post("Model load request sent.");
 }
