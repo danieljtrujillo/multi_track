@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 65.0, 85.0, 578.0, 814.0 ],
+		"rect" : [ 42.0, 134.0, 1111.0, 748.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -59,7 +59,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 1030.5882568359375, 1200.0, 50.0, 22.0 ],
-					"text" : "64500."
+					"text" : "0."
 				}
 
 			}
@@ -142,7 +142,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 1435.2298583984375, 1331.9100341796875, 87.232421875, 22.0 ],
-					"text" : "line 64500."
+					"text" : "line 0."
 				}
 
 			}
@@ -1148,8 +1148,10 @@
 					"maxclass" : "comment",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 1669.23095703125, 104.615394592285156, 234.0, 29.0 ],
-					"text" : "MAC OS",
+					"patching_rect" : [ 1687.23095703125, 131.06292724609375, 234.0, 29.0 ],
+					"presentation" : 1,
+					"presentation_rect" : [ 521.55450439453125, 496.06292724609375, 234.0, 29.0 ],
+					"text" : "Manual command",
 					"textcolor" : [ 0.960784316062927, 0.933333337306976, 0.933333337306976, 1.0 ]
 				}
 
@@ -1241,7 +1243,9 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "bang" ],
 					"parameter_enable" : 0,
-					"patching_rect" : [ 1605.0, 110.56292724609375, 24.0, 24.0 ]
+					"patching_rect" : [ 1635.1849365234375, 153.778167724609375, 24.0, 24.0 ],
+					"presentation" : 1,
+					"presentation_rect" : [ 478.1849365234375, 494.56292724609375, 32.0, 32.0 ]
 				}
 
 			}
@@ -1254,8 +1258,11 @@
 					"numoutlets" : 4,
 					"outlettype" : [ "", "int", "", "" ],
 					"parameter_enable" : 0,
-					"patching_rect" : [ 1623.1849365234375, 152.738189697265625, 502.79571533203125, 48.076004028320313 ],
-					"text" : "set_command \"ssh -p 79 -t demo@sar1.ucsd.edu \\\"zsh -ic 'cd musical-accompaniment-ldm && conda run --no-capture-output -n ctm_gen python server.py --serverport 7007 --clientport 8000'\\\""
+					"patching_rect" : [ 1635.1849365234375, 182.738189697265625, 502.79571533203125, 48.076004028320313 ],
+					"presentation" : 1,
+					"presentation_linecount" : 3,
+					"presentation_rect" : [ 478.1849365234375, 528.56292724609375, 502.79571533203125, 48.076004028320313 ],
+					"text" : "set_command \"ssh -p 22 -t karchkhadze@reach1.ircam.fr \\\"bash -ic 'cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && conda run --no-capture-output -n ctm_gen python server.py --serverport 7000 --clientport 8000'\\\"\""
 				}
 
 			}
@@ -1274,9 +1281,9 @@
 					"numoutlets" : 1,
 					"offset" : [ 0.0, 0.0 ],
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 999.2684326171875, 79.868537902832031, 321.225189208984375, 222.819244384765625 ],
+					"patching_rect" : [ 999.2684326171875, 79.868537902832031, 411.225189208984375, 171.819244384765625 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 0.0, 293.283477783203125, 321.05926513671875, 221.819244384765625 ],
+					"presentation_rect" : [ 0.0, 293.283477783203125, 462.019256591796875, 168.819244384765625 ],
 					"viewvisibility" : 1
 				}
 
@@ -1302,128 +1309,6 @@
 					"outlettype" : [ "bang" ],
 					"patching_rect" : [ 1357.0, 826.260009765625, 58.0, 22.0 ],
 					"text" : "loadbang"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-340",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2791.51025390625, 980.822998046875, 24.0, 24.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-337",
-					"linecount" : 3,
-					"maxclass" : "textedit",
-					"numinlets" : 1,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "int", "", "" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2283.30078125, 1052.6541748046875, 478.4727783203125, 70.05072021484375 ],
-					"text" : "set_command \"ssh -t karchkhadze@reach1.ircam.fr \\\"bash -l -c 'cd musical-accompaniment-ldm && conda run -n ctm_gen python server.py --serverport 7000 --clientport 8000'\\\"\"\n"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"bubble" : 1,
-					"fontname" : "Arial",
-					"fontsize" : 13.0,
-					"id" : "obj-258",
-					"linecount" : 3,
-					"maxclass" : "comment",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 2759.426513671875, 324.9989013671875, 137.88311767578125, 54.0 ],
-					"text" : "Remote Server REACH2 forcing gpu:1, CD model"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"bubble" : 1,
-					"fontname" : "Arial",
-					"fontsize" : 13.0,
-					"id" : "obj-179",
-					"maxclass" : "comment",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 2345.8671875, 598.41693115234375, 143.0, 25.0 ],
-					"text" : "Local Sever"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-200",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2291.91455078125, 598.41693115234375, 24.0, 24.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-222",
-					"linecount" : 3,
-					"maxclass" : "textedit",
-					"numinlets" : 1,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "int", "", "" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2291.91455078125, 636.838134765625, 461.46026611328125, 87.678070068359375 ],
-					"text" : "set_command \"cmd.exe /K \\\"cd %USERPROFILE%\\\\musical-accompaniment-ldm && C:\\\\Users\\\\karch\\\\anaconda3\\\\envs\\\\ctm_gen\\\\python.exe server.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\""
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-116",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2286.74755859375, 729.5081787109375, 24.0, 24.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"bubble" : 1,
-					"fontname" : "Arial",
-					"fontsize" : 13.0,
-					"id" : "obj-114",
-					"linecount" : 4,
-					"maxclass" : "comment",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 2751.6513671875, 725.6673583984375, 135.88311767578125, 69.0 ],
-					"text" : "Remote Server REACH2 forcing gpu:0, Diffusion model"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-97",
-					"linecount" : 4,
-					"maxclass" : "textedit",
-					"numinlets" : 1,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "int", "", "" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2286.74755859375, 759.5135498046875, 451.4783935546875, 75.835838317871094 ],
-					"text" : "set_command \"ssh -t -R 8000:localhost:8000 karchkhadze@reach2.ircam.fr \\\"cd ctm_pl_gen && export CUDA_VISIBLE_DEVICES=1 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server.py --serverport 7000 --clientport 8000\\\"\""
 				}
 
 			}
@@ -1852,7 +1737,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 73.210014343261719, 365.5850830078125, 50.0, 22.0 ],
-					"text" : "166"
+					"text" : "12"
 				}
 
 			}
@@ -1950,14 +1835,14 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 302.0, 3535.0, 82.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 635.0, 301.0, 82.0, 20.0 ],
+					"presentation_rect" : [ 654.0, 300.0, 82.0, 20.0 ],
 					"text" : "Sample Rate:"
 				}
 
 			}
 , 			{
 				"box" : 				{
-					"bgcolor" : [ 1.0, 1.0, 1.0, 1.0 ],
+					"bgcolor" : [ 1.0, 0.3, 0.3, 1.0 ],
 					"id" : "obj-sr",
 					"maxclass" : "number",
 					"numinlets" : 1,
@@ -1966,7 +1851,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 382.0, 3535.0, 70.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 715.0, 301.0, 57.0, 22.0 ],
+					"presentation_rect" : [ 734.0, 300.0, 57.0, 22.0 ],
 					"textcolor" : [ 0.070588235294118, 0.070588235294118, 0.070588235294118, 1.0 ]
 				}
 
@@ -2015,14 +1900,14 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 302.0, 3565.0, 84.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 635.0, 331.0, 84.0, 20.0 ],
+					"presentation_rect" : [ 654.0, 330.0, 84.0, 20.0 ],
 					"text" : "Signal Vector:"
 				}
 
 			}
 , 			{
 				"box" : 				{
-					"bgcolor" : [ 1.0, 1.0, 1.0, 1.0 ],
+					"bgcolor" : [ 1.0, 0.3, 0.3, 1.0 ],
 					"id" : "obj-sv",
 					"maxclass" : "number",
 					"numinlets" : 1,
@@ -2031,7 +1916,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 382.0, 3565.0, 70.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 715.0, 331.0, 57.0, 22.0 ],
+					"presentation_rect" : [ 734.0, 330.0, 57.0, 22.0 ],
 					"textcolor" : [ 0.070588235294118, 0.070588235294118, 0.070588235294118, 1.0 ]
 				}
 
@@ -2080,14 +1965,14 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 302.0, 3595.0, 80.0, 20.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 635.0, 361.0, 80.0, 20.0 ],
+					"presentation_rect" : [ 654.0, 360.0, 80.0, 20.0 ],
 					"text" : "I/O Vector:"
 				}
 
 			}
 , 			{
 				"box" : 				{
-					"bgcolor" : [ 1.0, 1.0, 1.0, 1.0 ],
+					"bgcolor" : [ 1.0, 0.3, 0.3, 1.0 ],
 					"id" : "obj-io",
 					"maxclass" : "number",
 					"numinlets" : 1,
@@ -2096,7 +1981,7 @@
 					"parameter_enable" : 0,
 					"patching_rect" : [ 382.0, 3595.0, 70.0, 22.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 715.0, 361.0, 57.0, 22.0 ],
+					"presentation_rect" : [ 734.0, 360.0, 57.0, 22.0 ],
 					"textcolor" : [ 0.070588235294118, 0.070588235294118, 0.070588235294118, 1.0 ]
 				}
 
@@ -2728,7 +2613,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 351.87603759765625, 1321.404296875, 50.0, 22.0 ],
-					"text" : "6000."
+					"text" : "22050."
 				}
 
 			}
@@ -2740,7 +2625,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 135.922073364257813, 1342.307861328125, 126.923088073730469, 22.0 ],
-					"text" : "250787.120181"
+					"text" : "20000."
 				}
 
 			}
@@ -2860,7 +2745,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 333.68902587890625, 1375.08447265625, 109.468086242675781, 22.0 ],
-					"text" : "244787.120181"
+					"text" : "-2050."
 				}
 
 			}
@@ -3187,8 +3072,8 @@
 , 							{
 								"name" : "Default M4L",
 								"default" : 								{
-									"fontsize" : [ 11.0 ],
 									"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+									"fontsize" : [ 11.0 ],
 									"fontname" : [ "Arial Bold" ]
 								}
 ,
@@ -3198,8 +3083,8 @@
 , 							{
 								"name" : "Default M4L Poletti",
 								"default" : 								{
-									"fontsize" : [ 10.0 ],
 									"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+									"fontsize" : [ 10.0 ],
 									"fontname" : [ "Arial Bold" ]
 								}
 ,
@@ -3209,7 +3094,7 @@
 , 							{
 								"name" : "Default M4L-1",
 								"default" : 								{
-									"fontsize" : [ 11.0 ],
+									"fontface" : [ 1 ],
 									"bgfillcolor" : 									{
 										"angle" : 270.0,
 										"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -3219,8 +3104,8 @@
 										"type" : "gradient"
 									}
 ,
-									"fontname" : [ "Arial" ],
-									"fontface" : [ 1 ]
+									"fontsize" : [ 11.0 ],
+									"fontname" : [ "Arial" ]
 								}
 ,
 								"parentstyle" : "",
@@ -3274,7 +3159,6 @@
 , 							{
 								"name" : "jbb",
 								"default" : 								{
-									"fontsize" : [ 9.0 ],
 									"bgfillcolor" : 									{
 										"angle" : 270.0,
 										"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -3284,6 +3168,7 @@
 										"type" : "gradient"
 									}
 ,
+									"fontsize" : [ 9.0 ],
 									"fontname" : [ "Arial" ]
 								}
 ,
@@ -3303,8 +3188,8 @@
 								"name" : "karchkha1",
 								"default" : 								{
 									"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ],
-									"fontsize" : [ 20.0 ],
-									"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ]
+									"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ],
+									"fontsize" : [ 20.0 ]
 								}
 ,
 								"parentstyle" : "",
@@ -3549,13 +3434,13 @@
 					"presentation_rect" : [ 58.557838439941406, 42.37103271484375, 81.190475463867188, 26.177619934082031 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "textbutton",
+							"parameter_type" : 3,
 							"parameter_longname" : "textbutton[2]",
 							"parameter_initial_enable" : 1,
 							"parameter_invisible" : 1,
 							"parameter_mmax" : 1.0,
-							"parameter_initial" : [ 0 ],
-							"parameter_shortname" : "textbutton",
-							"parameter_type" : 3
+							"parameter_initial" : [ 0 ]
 						}
 
 					}
@@ -3597,13 +3482,13 @@
 					"presentation_rect" : [ 191.37451171875, 192.645217895507813, 78.0, 54.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "Play Speed",
+							"parameter_type" : 0,
+							"parameter_unitstyle" : 1,
 							"parameter_longname" : "Play Speed",
 							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 2.0,
-							"parameter_initial" : [ 1.0 ],
-							"parameter_shortname" : "Play Speed",
-							"parameter_type" : 0,
-							"parameter_unitstyle" : 1
+							"parameter_initial" : [ 1.0 ]
 						}
 
 					}
@@ -3634,13 +3519,13 @@
 					"presentation_rect" : [ 200.958786010742188, 36.520187377929688, 57.0, 33.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "textbutton",
+							"parameter_type" : 3,
 							"parameter_longname" : "textbutton[1]",
 							"parameter_initial_enable" : 1,
 							"parameter_invisible" : 1,
 							"parameter_mmax" : 1.0,
-							"parameter_initial" : [ 0 ],
-							"parameter_shortname" : "textbutton",
-							"parameter_type" : 3
+							"parameter_initial" : [ 0 ]
 						}
 
 					}
@@ -3686,113 +3571,6 @@
 					"presentation_rect" : [ 0.0, 0.0, 800.9068603515625, 17.0 ],
 					"proportion" : 0.39,
 					"rounded" : 0
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-175",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2585.10107421875, 264.8441162109375, 24.0, 24.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-178",
-					"linecount" : 4,
-					"maxclass" : "textedit",
-					"numinlets" : 1,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "int", "", "" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2293.622802734375, 329.214508056640625, 451.4783935546875, 75.835838317871094 ],
-					"text" : "set_command \"ssh -t karchkhadze@reach2.ircam.fr \\\"cd ctm_pl_gen && export CUDA_VISIBLE_DEVICES=0 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server_CD.py --serverport 7000 --clientport 8000 --server_ip 129.102.15.13\\\"\""
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"bubble" : 1,
-					"fontname" : "Arial",
-					"fontsize" : 13.0,
-					"id" : "obj-234",
-					"maxclass" : "comment",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 2338.761962890625, 445.259033203125, 143.0, 25.0 ],
-					"text" : "Local Sever"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-282",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2284.809326171875, 445.259033203125, 24.0, 24.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-297",
-					"linecount" : 3,
-					"maxclass" : "textedit",
-					"numinlets" : 1,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "int", "", "" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2284.809326171875, 483.680267333984375, 461.46026611328125, 87.678070068359375 ],
-					"text" : "set_command \"cmd.exe /K \\\"cd %USERPROFILE%\\\\musical-accompaniment-ldm && C:\\\\Users\\\\karch\\\\anaconda3\\\\envs\\\\ctm_gen\\\\python.exe server_CD.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\""
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"bubble" : 1,
-					"fontname" : "Arial",
-					"fontsize" : 13.0,
-					"id" : "obj-146",
-					"linecount" : 3,
-					"maxclass" : "comment",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 2817.99365234375, 908.322998046875, 137.88311767578125, 54.0 ],
-					"text" : "Remote Server REACH1 forcing gpu:1, CD model"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-47",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2787.51025390625, 923.822998046875, 24.0, 24.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-50",
-					"linecount" : 4,
-					"maxclass" : "textedit",
-					"numinlets" : 1,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "int", "", "" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2284.03173828125, 967.2755126953125, 451.4783935546875, 75.835838317871094 ],
-					"text" : "set_command \"ssh -t -R 8000:localhost:8000 karchkhadze@reach1.ircam.fr \\\"cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server_CD.py --serverport 7000 --clientport 8000\\\"\""
 				}
 
 			}
@@ -3874,7 +3652,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 84.437568664550781, 663.2435302734375, 50.0, 22.0 ],
-					"text" : "43"
+					"text" : "7"
 				}
 
 			}
@@ -3923,18 +3701,6 @@
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 154.98785400390625, 137.027420043945313, 256.0, 22.0 ],
 					"text" : "replace combined_audio_44100_4ch_20s.wav"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-301",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2837.147459983825684, 550.586978495121002, 24.0, 24.0 ]
 				}
 
 			}
@@ -4042,7 +3808,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 772.99517822265625, 995.43804931640625, 93.617019653320313, 22.0 ],
-					"text" : "64500."
+					"text" : "0."
 				}
 
 			}
@@ -4135,21 +3901,6 @@
 			}
 , 			{
 				"box" : 				{
-					"bubble" : 1,
-					"fontname" : "Arial",
-					"fontsize" : 13.0,
-					"id" : "obj-66",
-					"linecount" : 4,
-					"maxclass" : "comment",
-					"numinlets" : 1,
-					"numoutlets" : 0,
-					"patching_rect" : [ 2796.99365234375, 826.5687255859375, 149.88311767578125, 69.0 ],
-					"text" : "Remote Server REACH1 forcing gpu:0, Diffusion model"
-				}
-
-			}
-, 			{
-				"box" : 				{
 					"format" : 6,
 					"id" : "obj-72",
 					"maxclass" : "flonum",
@@ -4170,32 +3921,6 @@
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 1007.44757080078125, 1810.8800048828125, 77.0, 22.0 ],
 					"text" : "loadmess -6."
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-25",
-					"maxclass" : "button",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2766.33984375, 841.5687255859375, 24.0, 24.0 ]
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-8",
-					"linecount" : 4,
-					"maxclass" : "textedit",
-					"numinlets" : 1,
-					"numoutlets" : 4,
-					"outlettype" : [ "", "int", "", "" ],
-					"parameter_enable" : 0,
-					"patching_rect" : [ 2283.30078125, 871.9871826171875, 451.4783935546875, 75.835838317871094 ],
-					"text" : "set_command \"ssh -t -R 8000:localhost:8000 karchkhadze@reach1.ircam.fr \\\"cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && /data/reach/karchkhadze/anaconda3/envs/ctm_gen/bin/python server.py --serverport 7000 --clientport 8000\\\"\""
 				}
 
 			}
@@ -4350,7 +4075,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 1415.4974365234375, 1619.0496826171875, 50.0, 22.0 ],
-					"text" : "1500"
+					"text" : "5512"
 				}
 
 			}
@@ -4468,7 +4193,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 2,
 					"outlettype" : [ "", "" ],
-					"patching_rect" : [ 2671.327880859375, 108.528335571289063, 67.0, 22.0 ],
+					"patching_rect" : [ 2663.761962890625, 108.528335571289063, 67.0, 22.0 ],
 					"save" : [ "#N", "thispatcher", ";", "#Q", "end", ";" ],
 					"text" : "thispatcher"
 				}
@@ -4827,7 +4552,7 @@
 					"maxclass" : "newobj",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 2524.309326171875, 212.195480346679688, 84.0, 22.0 ],
+					"patching_rect" : [ 2489.309326171875, 179.195480346679688, 84.0, 22.0 ],
 					"text" : "s sample_rate"
 				}
 
@@ -4883,18 +4608,6 @@
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 763.96051025390625, 380.663360595703125, 76.0, 22.0 ],
 					"text" : "get_client_ip"
-				}
-
-			}
-, 			{
-				"box" : 				{
-					"id" : "obj-3",
-					"maxclass" : "newobj",
-					"numinlets" : 1,
-					"numoutlets" : 1,
-					"outlettype" : [ "bang" ],
-					"patching_rect" : [ 2766.33984375, 801.205322265625, 58.0, 22.0 ],
-					"text" : "loadbang"
 				}
 
 			}
@@ -5035,7 +4748,7 @@
 					"format" : 6,
 					"id" : "obj-154",
 					"maxclass" : "flonum",
-					"maximum" : 244787.120181405887706,
+					"maximum" : -2050.0,
 					"minimum" : 0.0,
 					"numinlets" : 1,
 					"numoutlets" : 2,
@@ -5077,7 +4790,7 @@
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 928.01910400390625, 995.43804931640625, 93.617019653320313, 22.0 ],
-					"text" : "65999.977324"
+					"text" : "5512.416667"
 				}
 
 			}
@@ -5258,14 +4971,14 @@
 					"presentation_rect" : [ 690.30169677734375, 59.947998046875, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "live.gain~",
+							"parameter_type" : 0,
+							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[7]",
 							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ],
-							"parameter_shortname" : "live.gain~",
-							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_initial" : [ -40 ]
 						}
 
 					}
@@ -5291,14 +5004,14 @@
 					"presentation_rect" : [ 690.30169677734375, 214.145217895507813, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "live.gain~",
+							"parameter_type" : 0,
+							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[6]",
 							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ],
-							"parameter_shortname" : "live.gain~",
-							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_initial" : [ -40 ]
 						}
 
 					}
@@ -5324,14 +5037,14 @@
 					"presentation_rect" : [ 690.30169677734375, 161.538070678710938, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "live.gain~",
+							"parameter_type" : 0,
+							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[5]",
 							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ],
-							"parameter_shortname" : "live.gain~",
-							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_initial" : [ -40 ]
 						}
 
 					}
@@ -5373,14 +5086,14 @@
 					"presentation_rect" : [ 690.30169677734375, 108.930908203125, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "live.gain~",
+							"parameter_type" : 0,
+							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[4]",
 							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ],
-							"parameter_shortname" : "live.gain~",
-							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_initial" : [ -40 ]
 						}
 
 					}
@@ -5404,8 +5117,8 @@
 						"basictuning" : 440,
 						"followglobaltempo" : 0,
 						"formantcorrection" : 0,
-						"loopend" : [ 67500.0, "ms" ],
-						"loopstart" : [ 61500.0, "ms" ],
+						"loopend" : [ 22050.0, "ms" ],
+						"loopstart" : [ 0.0, "ms" ],
 						"mode" : "basic",
 						"originallength" : [ 0.0, "ticks" ],
 						"originaltempo" : 120.0,
@@ -5683,13 +5396,13 @@
 					"fontname" : "Arial",
 					"fontsize" : 13.0,
 					"id" : "obj-89",
-					"linecount" : 2,
+					"linecount" : 3,
 					"maxclass" : "message",
 					"numinlets" : 2,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 614.1099853515625, 2490.174560546875, 99.0, 38.0 ],
-					"text" : "combined_audio_44100.wav",
+					"patching_rect" : [ 614.1099853515625, 2490.174560546875, 99.0, 52.0 ],
+					"text" : "combined_audio_44100_4ch_20s.wav",
 					"textcolor" : [ 0.996078431606293, 0.996078431606293, 0.996078431606293, 1.0 ]
 				}
 
@@ -6004,14 +5717,14 @@
 					"presentation_rect" : [ 275.05926513671875, 90.447998046875, 46.0, 153.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_shortname" : "live.gain~",
+							"parameter_type" : 0,
+							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~",
 							"parameter_initial_enable" : 1,
 							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -70.0 ],
-							"parameter_shortname" : "live.gain~",
-							"parameter_type" : 0,
-							"parameter_unitstyle" : 4
+							"parameter_initial" : [ -70.0 ]
 						}
 
 					}
@@ -6027,7 +5740,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 2477.809326171875, 145.027420043945313, 70.0, 22.0 ],
+					"patching_rect" : [ 2442.809326171875, 112.027420043945313, 70.0, 22.0 ],
 					"text" : "loadmess 1"
 				}
 
@@ -6039,7 +5752,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 2,
 					"outlettype" : [ "", "int" ],
-					"patching_rect" : [ 2476.309326171875, 173.027420043945313, 67.0, 22.0 ],
+					"patching_rect" : [ 2441.309326171875, 140.027420043945313, 67.0, 22.0 ],
 					"text" : "adstatus sr"
 				}
 
@@ -6063,7 +5776,7 @@
 					"numinlets" : 2,
 					"numoutlets" : 2,
 					"outlettype" : [ "", "int" ],
-					"patching_rect" : [ 2471.809326171875, 116.676063537597656, 85.0, 22.0 ],
+					"patching_rect" : [ 2436.809326171875, 83.676063537597656, 85.0, 22.0 ],
 					"text" : "adstatus sigvs"
 				}
 
@@ -6374,7 +6087,7 @@
 					"numoutlets" : 0,
 					"patching_rect" : [ 965.2364501953125, 2150.01904296875, 64.0, 64.0 ],
 					"presentation" : 1,
-					"presentation_rect" : [ 630.0, 293.283477783203125, 150.3475341796875, 95.433029174804688 ],
+					"presentation_rect" : [ 649.0, 292.283477783203125, 150.3475341796875, 95.433029174804688 ],
 					"proportion" : 0.39,
 					"rounded" : 0
 				}
@@ -6430,6 +6143,23 @@
 					"outlettype" : [ "" ],
 					"patching_rect" : [ 1195.54443359375, 723.0, 88.0, 22.0 ],
 					"text" : "send_mode $1"
+				}
+
+			}
+, 			{
+				"box" : 				{
+					"bgcolor" : [ 0.274509803921569, 0.23921568627451, 0.23921568627451, 0.0 ],
+					"id" : "obj-741",
+					"linecount" : 47,
+					"maxclass" : "comment",
+					"numinlets" : 1,
+					"numoutlets" : 0,
+					"patching_rect" : [ 1942.3856201171875, 262.519287109375, 341.0, 650.0 ],
+					"presentation" : 1,
+					"presentation_linecount" : 40,
+					"presentation_rect" : [ 0.0, 467.0, 465.0, 556.0 ],
+					"text" : "SERVER COMMAND\n\n\nThe server_config panel above auto-generates a set_command for common setups. To monitor the output, check the Max console — a new command is generated whenever any setting changes. If your setup differs, write your command in the custom command textedit and click bang. You need SSH access to the server with a public key (no password), and open (and if nessesary forwarded) UDP ports for sending and receiving.\n\nEXAMPLE COMMANDS:\n\nLocal Mac:\nset_command \"zsh -ic \\\"cd ~/musical-accompaniment-ldm && conda run --no-capture-output -n ctm_gen python server.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\"\n\nLocal Windows:\nset_command \"cmd.exe /K \\\"cd USERPROFILE\\\\musical-accompaniment-ldm && set CUDA_VISIBLE_DEVICES=0 && conda run --no-capture-output -n ctm_gen python server.py --serverport 7000 --clientport 8000 --client_ip 127.0.0.1\\\"\"\n\n\nRemote Linux:\nset_command \"ssh -p 1234 -t user@hostname \\\"bash -ic 'cd musical-accompaniment-ldm && export CUDA_VISIBLE_DEVICES=0 && conda run --no-capture-output -n ctm_gen python server.py --serverport 7000 --clientport 8000'\\\"\"\n\nRemote Mac:\nset_command \"ssh -p 79 -t user@hostname \\\"zsh -ic 'cd musical-accompaniment-ldm && conda run --no-capture-output -n ctm_gen python server.py --serverport 7000 --clientport 8000'\\\"\"\n\nRemote Windows:\nset_command \"ssh -t karchkhadze@reach1.ircam.fr \\\"cmd /C 'cd c:user\\musical-accompaniment-ldm && set CUDA_VISIBLE_DEVICES=0 && conda run --no-capture-output -n ctm_gen python server.py --serverport 7000 --clientport 8000 --client_ip 137.110.36.241'/\"\"\n\n",
+					"textcolor" : [ 0.996078431606293, 0.996078431606293, 0.996078431606293, 1.0 ]
 				}
 
 			}
@@ -6524,13 +6254,6 @@
 				"patchline" : 				{
 					"destination" : [ "obj-90", 0 ],
 					"source" : [ "obj-111", 6 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
-					"destination" : [ "obj-97", 0 ],
-					"source" : [ "obj-116", 0 ]
 				}
 
 			}
@@ -7003,14 +6726,6 @@
 			}
 , 			{
 				"patchline" : 				{
-					"destination" : [ "obj-178", 0 ],
-					"midpoints" : [ 2594.60107421875, 314.000015258789063, 2446.0, 314.000015258789063, 2446.0, 314.000015258789063, 2303.122802734375, 314.000015258789063 ],
-					"source" : [ "obj-175", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
 					"destination" : [ "obj-431", 0 ],
 					"midpoints" : [ 682.6285400390625, 1626.0, 669.0, 1626.0, 669.0, 1698.0, 963.0, 1698.0, 963.0, 1566.0, 912.0, 1566.0, 912.0, 1398.0, 976.84210205078125, 1398.0 ],
 					"source" : [ "obj-176", 0 ]
@@ -7143,13 +6858,6 @@
 					"destination" : [ "obj-12", 0 ],
 					"midpoints" : [ 1312.510986328125, 757.0, 870.7308349609375, 757.0 ],
 					"source" : [ "obj-2", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
-					"destination" : [ "obj-222", 0 ],
-					"source" : [ "obj-200", 0 ]
 				}
 
 			}
@@ -7628,13 +7336,6 @@
 			}
 , 			{
 				"patchline" : 				{
-					"destination" : [ "obj-8", 0 ],
-					"source" : [ "obj-25", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
 					"destination" : [ "obj-261", 0 ],
 					"source" : [ "obj-250", 0 ]
 				}
@@ -7921,13 +7622,6 @@
 			}
 , 			{
 				"patchline" : 				{
-					"destination" : [ "obj-297", 0 ],
-					"source" : [ "obj-282", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
 					"destination" : [ "obj-192", 0 ],
 					"source" : [ "obj-283", 0 ]
 				}
@@ -8086,13 +7780,6 @@
 					"destination" : [ "obj-431", 0 ],
 					"midpoints" : [ 691.80841064453125, 1665.0, 669.0, 1665.0, 669.0, 1698.0, 963.0, 1698.0, 963.0, 1566.0, 912.0, 1566.0, 912.0, 1398.0, 976.84210205078125, 1398.0 ],
 					"source" : [ "obj-299", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
-					"destination" : [ "obj-25", 0 ],
-					"source" : [ "obj-3", 0 ]
 				}
 
 			}
@@ -8486,13 +8173,6 @@
 					"destination" : [ "obj-430", 0 ],
 					"midpoints" : [ 413.293487548828125, 1725.0, 1011.0, 1725.0, 1011.0, 1644.0, 1036.1485595703125, 1644.0 ],
 					"source" : [ "obj-34", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
-					"destination" : [ "obj-337", 0 ],
-					"source" : [ "obj-340", 0 ]
 				}
 
 			}
@@ -8995,13 +8675,6 @@
 				"patchline" : 				{
 					"destination" : [ "obj-44", 0 ],
 					"source" : [ "obj-46", 0 ]
-				}
-
-			}
-, 			{
-				"patchline" : 				{
-					"destination" : [ "obj-50", 0 ],
-					"source" : [ "obj-47", 0 ]
 				}
 
 			}
@@ -9537,14 +9210,14 @@
 			}
  ],
 		"parameters" : 		{
-			"obj-210" : [ "textbutton[1]", "textbutton", 0 ],
-			"obj-302" : [ "textbutton[2]", "textbutton", 0 ],
-			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
 			"obj-173" : [ "live.gain~[6]", "live.gain~", 0 ],
-			"obj-158" : [ "live.gain~[4]", "live.gain~", 0 ],
+			"obj-172" : [ "live.gain~[5]", "live.gain~", 0 ],
 			"obj-183" : [ "live.gain~[7]", "live.gain~", 0 ],
 			"obj-34" : [ "live.gain~", "live.gain~", 0 ],
-			"obj-172" : [ "live.gain~[5]", "live.gain~", 0 ],
+			"obj-210" : [ "textbutton[1]", "textbutton", 0 ],
+			"obj-302" : [ "textbutton[2]", "textbutton", 0 ],
+			"obj-158" : [ "live.gain~[4]", "live.gain~", 0 ],
+			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
 			"parameterbanks" : 			{
 
 			}
@@ -9620,8 +9293,8 @@
 , 			{
 				"name" : "Default M4L",
 				"default" : 				{
-					"fontsize" : [ 11.0 ],
 					"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+					"fontsize" : [ 11.0 ],
 					"fontname" : [ "Arial Bold" ]
 				}
 ,
@@ -9631,8 +9304,8 @@
 , 			{
 				"name" : "Default M4L Poletti",
 				"default" : 				{
-					"fontsize" : [ 10.0 ],
 					"patchlinecolor" : [ 0.290196, 0.309804, 0.301961, 0.85 ],
+					"fontsize" : [ 10.0 ],
 					"fontname" : [ "Arial Bold" ]
 				}
 ,
@@ -9642,7 +9315,7 @@
 , 			{
 				"name" : "Default M4L-1",
 				"default" : 				{
-					"fontsize" : [ 11.0 ],
+					"fontface" : [ 1 ],
 					"bgfillcolor" : 					{
 						"angle" : 270.0,
 						"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -9652,8 +9325,8 @@
 						"type" : "gradient"
 					}
 ,
-					"fontname" : [ "Arial" ],
-					"fontface" : [ 1 ]
+					"fontsize" : [ 11.0 ],
+					"fontname" : [ "Arial" ]
 				}
 ,
 				"parentstyle" : "",
@@ -9707,7 +9380,6 @@
 , 			{
 				"name" : "jbb",
 				"default" : 				{
-					"fontsize" : [ 9.0 ],
 					"bgfillcolor" : 					{
 						"angle" : 270.0,
 						"color" : [ 0.290196, 0.309804, 0.301961, 1.0 ],
@@ -9717,6 +9389,7 @@
 						"type" : "gradient"
 					}
 ,
+					"fontsize" : [ 9.0 ],
 					"fontname" : [ "Arial" ]
 				}
 ,
@@ -9736,8 +9409,8 @@
 				"name" : "karchkha1",
 				"default" : 				{
 					"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ],
-					"fontsize" : [ 20.0 ],
-					"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ]
+					"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ],
+					"fontsize" : [ 20.0 ]
 				}
 ,
 				"parentstyle" : "",
