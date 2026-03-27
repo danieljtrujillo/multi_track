@@ -72,6 +72,7 @@
 #include <ifaddrs.h>
 #include <sys/time.h>
 #include <sys/stat.h>
+#include <sys/sysctl.h>
 #endif
 
 #include "osc/OscOutboundPacketStream.h"
@@ -346,6 +347,15 @@ t_multi_track* multi_track_new(t_symbol* s, long argc, t_atom* argv)
 
 		attr_args_process(x, argc, argv);
 
+#ifndef _WIN32
+		// macOS default UDP datagram limit (9216 bytes) is too small for audio chunks.
+		// If it's not already raised, prompt the user once with an admin dialog.
+		{
+			int cur = 0; size_t sz = sizeof(cur);
+			if (sysctlbyname("net.inet.udp.maxdgram", &cur, &sz, nullptr, 0) == 0 && cur < 65535)
+				system("osascript -e 'do shell script \"sysctl -w net.inet.udp.maxdgram=65535\" with administrator privileges with prompt \"multi_track needs to increase the UDP packet size limit for audio streaming. To avoid this prompt on every restart, run: sudo sysctl -w net.inet.udp.maxdgram=65535 and add net.inet.udp.maxdgram=65535 to /etc/sysctl.conf\"'");
+		}
+#endif
 		multi_track_OSC_listen_thread(x);
 
 		x->package_size = 10240;
@@ -674,7 +684,12 @@ void multi_track_predict(t_multi_track* x, long curr) {
 		auto _now_sys = std::chrono::system_clock::now();
 		std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
 		auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
-		std::tm _tm; localtime_s(&_tm, &_now_t);
+		std::tm _tm;
+#ifdef _WIN32
+		localtime_s(&_tm, &_now_t);
+#else
+		localtime_r(&_now_t, &_tm);
+#endif
 		post("[SEND]    done   +%.1f ms  (%d chunks)  batch=%d  %02d:%02d:%02d.%03lld",
 			t_send_done, total_expected_chunks, batch_id, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
 	}
@@ -1643,7 +1658,12 @@ public:
 						auto _now_sys = std::chrono::system_clock::now();
 						std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
 						auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
-						std::tm _tm; localtime_s(&_tm, &_now_t);
+						std::tm _tm;
+#ifdef _WIN32
+		localtime_s(&_tm, &_now_t);
+#else
+		localtime_r(&_now_t, &_tm);
+#endif
 						if (is_current) {
 							if (*verbose_flag)
 								post("[RX]      first  +%.1f ms  (%s)  batch=%d  %02d:%02d:%02d.%03lld",
@@ -1704,7 +1724,12 @@ public:
 					auto _now_sys = std::chrono::system_clock::now();
 					std::time_t _now_t = std::chrono::system_clock::to_time_t(_now_sys);
 					auto _ms = std::chrono::duration_cast<std::chrono::milliseconds>(_now_sys.time_since_epoch()).count() % 1000;
-					std::tm _tm; localtime_s(&_tm, &_now_t);
+					std::tm _tm;
+#ifdef _WIN32
+		localtime_s(&_tm, &_now_t);
+#else
+		localtime_r(&_now_t, &_tm);
+#endif
 					post("[RX]      complete  +%.1f ms  (%s, %d chunks)  batch=%d  %02d:%02d:%02d.%03lld",
 						t_rx_done, addr, ss.expected, (int)incoming_batch_id, _tm.tm_hour, _tm.tm_min, _tm.tm_sec, (long long)_ms);
 				}

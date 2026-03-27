@@ -18,8 +18,19 @@ Separates audio into four instrument stems — **bass, drums, guitar, piano** �
 
 The `multi_track/` folder contains:
 - `externals/multi_track.mxe64` — the compiled external (Windows 64-bit)
+- `externals/multi_track.mxo` — the compiled external (macOS)
 - `help/multi_track.maxhelp` — the interactive help patch
 - `docs/refpages/multi_track.maxref.xml` — the reference documentation
+
+### macOS — UDP packet size
+
+macOS limits UDP datagrams to **9216 bytes** by default, which is too small for audio chunks. When you first load `multi_track` in Max, it will automatically detect this and show a system dialog asking for your admin password to raise the limit to 65535 bytes.
+
+To avoid this prompt on every restart, make the change permanent by adding one line to `/etc/sysctl.conf`:
+
+```bash
+echo "net.inet.udp.maxdgram=65535" | sudo tee -a /etc/sysctl.conf
+```
 
 ---
 
@@ -142,8 +153,6 @@ cmake .. -G Xcode
 
 The compiled external (`multi_track.mxo`) will appear in `max-sdk-main/externals/`.
 Copy it into `multi_track/externals/` to update the package.
-
-> **Note:** The source code currently contains Windows-specific APIs (WinSock, WinHTTP, Windows process management). A macOS port replacing these with POSIX equivalents is in progress.
 
 ---
 
