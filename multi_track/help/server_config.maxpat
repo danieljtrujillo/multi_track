@@ -135,7 +135,6 @@
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 307.0, 282.296875, 309.0, 49.0 ],
-									"presentation_linecount" : 4,
 									"text" : ";\r\nthispatcher script respondtoclick sshport, script sendbox sshport textcolor 1. 1. 1. 1."
 								}
 
@@ -149,7 +148,6 @@
 									"numoutlets" : 1,
 									"outlettype" : [ "" ],
 									"patching_rect" : [ 46.0, 373.296875, 451.0, 35.0 ],
-									"presentation_linecount" : 4,
 									"text" : ";\r\nthispatcher script ignoreclick sshport, script sendbox sshport textcolor 0.5 0.5 0.5 1."
 								}
 
@@ -921,7 +919,7 @@
 					"patching_rect" : [ 437.0, 46.0, 182.0, 24.0 ],
 					"presentation" : 1,
 					"presentation_rect" : [ 136.610626220703125, 28.892375946044922, 171.769882202148438, 25.0 ],
-					"text" : "karchkhadze@reach1.ircam.fr ",
+					"text" : " karchkhadze@reach1.ircam.fr",
 					"textcolor" : [ 1.0, 1.0, 1.0, 1.0 ],
 					"varname" : "host"
 				}
@@ -1126,7 +1124,7 @@
 					"numinlets" : 1,
 					"numoutlets" : 1,
 					"outlettype" : [ "" ],
-					"patching_rect" : [ 39.0, 745.0, 145.0, 22.0 ],
+					"patching_rect" : [ 39.0, 760.0, 145.0, 22.0 ],
 					"text" : "prepend set_command"
 				}
 
