@@ -10,7 +10,7 @@
 		}
 ,
 		"classnamespace" : "box",
-		"rect" : [ 34.0, 76.0, 1639.0, 810.0 ],
+		"rect" : [ -1886.0, 77.0, 1355.0, 1049.0 ],
 		"bglocked" : 0,
 		"openinpresentation" : 1,
 		"default_fontsize" : 12.0,
@@ -291,6 +291,7 @@
 , 							{
 								"name" : "Default M4L-1",
 								"default" : 								{
+									"fontface" : [ 1 ],
 									"fontsize" : [ 11.0 ],
 									"bgfillcolor" : 									{
 										"angle" : 270.0,
@@ -301,8 +302,7 @@
 										"type" : "gradient"
 									}
 ,
-									"fontname" : [ "Arial" ],
-									"fontface" : [ 1 ]
+									"fontname" : [ "Arial" ]
 								}
 ,
 								"parentstyle" : "",
@@ -337,8 +337,8 @@
 , 							{
 								"name" : "K2",
 								"default" : 								{
-									"fontsize" : [ 10.0 ],
-									"clearcolor" : [ 0.811765, 0.372549, 0.372549, 1.0 ]
+									"clearcolor" : [ 0.811765, 0.372549, 0.372549, 1.0 ],
+									"fontsize" : [ 10.0 ]
 								}
 ,
 								"parentstyle" : "karchkha1",
@@ -384,9 +384,9 @@
 , 							{
 								"name" : "karchkha1",
 								"default" : 								{
-									"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ],
+									"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ],
 									"fontsize" : [ 20.0 ],
-									"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ]
+									"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ]
 								}
 ,
 								"parentstyle" : "",
@@ -678,14 +678,14 @@
 					"fontsize" : 12.0,
 					"hint" : "The NOISR module is a simple noise synthesizer with an optional bandpass filter.",
 					"id" : "obj-181",
-					"linecount" : 7,
+					"linecount" : 6,
 					"maxclass" : "comment",
 					"numinlets" : 1,
 					"numoutlets" : 0,
-					"patching_rect" : [ 965.2364501953125, 2132.01904296875, 58.0, 100.0 ],
+					"patching_rect" : [ 965.2364501953125, 2132.01904296875, 58.0, 87.0 ],
 					"presentation" : 1,
 					"presentation_rect" : [ 8.263156890869141, 17.0, 339.736846923828125, 20.0 ],
-					"text" : "RTTIP -- Real-Time Instrumental Improvisation ",
+					"text" : "RTAP -- Real-Time Accompaniment Patch",
 					"textcolor" : [ 0.996078431606293, 0.996078431606293, 0.996078431606293, 1.0 ]
 				}
 
@@ -2348,7 +2348,7 @@
 			}
 , 			{
 				"box" : 				{
-					"bgcolor" : [ 1.0, 1.0, 1.0, 1.0 ],
+					"bgcolor" : [ 1.0, 0.3, 0.3, 1.0 ],
 					"id" : "obj-sv",
 					"maxclass" : "number",
 					"numinlets" : 1,
@@ -3523,6 +3523,7 @@
 , 							{
 								"name" : "Default M4L-1",
 								"default" : 								{
+									"fontface" : [ 1 ],
 									"fontsize" : [ 11.0 ],
 									"bgfillcolor" : 									{
 										"angle" : 270.0,
@@ -3533,8 +3534,7 @@
 										"type" : "gradient"
 									}
 ,
-									"fontname" : [ "Arial" ],
-									"fontface" : [ 1 ]
+									"fontname" : [ "Arial" ]
 								}
 ,
 								"parentstyle" : "",
@@ -3569,8 +3569,8 @@
 , 							{
 								"name" : "K2",
 								"default" : 								{
-									"fontsize" : [ 10.0 ],
-									"clearcolor" : [ 0.811765, 0.372549, 0.372549, 1.0 ]
+									"clearcolor" : [ 0.811765, 0.372549, 0.372549, 1.0 ],
+									"fontsize" : [ 10.0 ]
 								}
 ,
 								"parentstyle" : "karchkha1",
@@ -3616,9 +3616,9 @@
 , 							{
 								"name" : "karchkha1",
 								"default" : 								{
-									"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ],
+									"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ],
 									"fontsize" : [ 20.0 ],
-									"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ]
+									"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ]
 								}
 ,
 								"parentstyle" : "",
@@ -3863,13 +3863,13 @@
 					"presentation_rect" : [ 58.557838439941406, 42.37103271484375, 81.190475463867188, 26.177619934082031 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ 0 ],
 							"parameter_shortname" : "textbutton",
 							"parameter_type" : 3,
 							"parameter_longname" : "textbutton[2]",
 							"parameter_initial_enable" : 1,
 							"parameter_invisible" : 1,
-							"parameter_mmax" : 1.0,
-							"parameter_initial" : [ 0 ]
+							"parameter_mmax" : 1.0
 						}
 
 					}
@@ -3911,13 +3911,13 @@
 					"presentation_rect" : [ 191.37451171875, 192.645217895507813, 78.0, 54.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ 1.0 ],
 							"parameter_shortname" : "Play Speed",
 							"parameter_type" : 0,
 							"parameter_unitstyle" : 1,
 							"parameter_longname" : "Play Speed",
 							"parameter_initial_enable" : 1,
-							"parameter_mmax" : 2.0,
-							"parameter_initial" : [ 1.0 ]
+							"parameter_mmax" : 2.0
 						}
 
 					}
@@ -3948,13 +3948,13 @@
 					"presentation_rect" : [ 200.958786010742188, 36.520187377929688, 57.0, 33.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ 0 ],
 							"parameter_shortname" : "textbutton",
 							"parameter_type" : 3,
 							"parameter_longname" : "textbutton[1]",
 							"parameter_initial_enable" : 1,
 							"parameter_invisible" : 1,
-							"parameter_mmax" : 1.0,
-							"parameter_initial" : [ 0 ]
+							"parameter_mmax" : 1.0
 						}
 
 					}
@@ -5400,14 +5400,14 @@
 					"presentation_rect" : [ 690.30169677734375, 59.947998046875, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
 							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[7]",
 							"parameter_initial_enable" : 1,
-							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ]
+							"parameter_mmax" : 6.0
 						}
 
 					}
@@ -5433,14 +5433,14 @@
 					"presentation_rect" : [ 690.30169677734375, 214.145217895507813, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
 							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[6]",
 							"parameter_initial_enable" : 1,
-							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ]
+							"parameter_mmax" : 6.0
 						}
 
 					}
@@ -5466,14 +5466,14 @@
 					"presentation_rect" : [ 690.30169677734375, 161.538070678710938, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
 							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[5]",
 							"parameter_initial_enable" : 1,
-							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ]
+							"parameter_mmax" : 6.0
 						}
 
 					}
@@ -5515,14 +5515,14 @@
 					"presentation_rect" : [ 690.30169677734375, 108.930908203125, 99.0, 30.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ -40 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
 							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~[4]",
 							"parameter_initial_enable" : 1,
-							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -40 ]
+							"parameter_mmax" : 6.0
 						}
 
 					}
@@ -6146,14 +6146,14 @@
 					"presentation_rect" : [ 275.05926513671875, 90.447998046875, 46.0, 153.0 ],
 					"saved_attribute_attributes" : 					{
 						"valueof" : 						{
+							"parameter_initial" : [ -70.0 ],
 							"parameter_shortname" : "live.gain~",
 							"parameter_type" : 0,
 							"parameter_unitstyle" : 4,
 							"parameter_mmin" : -70.0,
 							"parameter_longname" : "live.gain~",
 							"parameter_initial_enable" : 1,
-							"parameter_mmax" : 6.0,
-							"parameter_initial" : [ -70.0 ]
+							"parameter_mmax" : 6.0
 						}
 
 					}
@@ -9671,14 +9671,14 @@
 			}
  ],
 		"parameters" : 		{
-			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
-			"obj-173" : [ "live.gain~[6]", "live.gain~", 0 ],
-			"obj-34" : [ "live.gain~", "live.gain~", 0 ],
-			"obj-172" : [ "live.gain~[5]", "live.gain~", 0 ],
-			"obj-183" : [ "live.gain~[7]", "live.gain~", 0 ],
-			"obj-158" : [ "live.gain~[4]", "live.gain~", 0 ],
 			"obj-210" : [ "textbutton[1]", "textbutton", 0 ],
 			"obj-302" : [ "textbutton[2]", "textbutton", 0 ],
+			"obj-289" : [ "Play Speed", "Play Speed", 0 ],
+			"obj-158" : [ "live.gain~[4]", "live.gain~", 0 ],
+			"obj-34" : [ "live.gain~", "live.gain~", 0 ],
+			"obj-173" : [ "live.gain~[6]", "live.gain~", 0 ],
+			"obj-172" : [ "live.gain~[5]", "live.gain~", 0 ],
+			"obj-183" : [ "live.gain~[7]", "live.gain~", 0 ],
 			"parameterbanks" : 			{
 
 			}
@@ -9776,6 +9776,7 @@
 , 			{
 				"name" : "Default M4L-1",
 				"default" : 				{
+					"fontface" : [ 1 ],
 					"fontsize" : [ 11.0 ],
 					"bgfillcolor" : 					{
 						"angle" : 270.0,
@@ -9786,8 +9787,7 @@
 						"type" : "gradient"
 					}
 ,
-					"fontname" : [ "Arial" ],
-					"fontface" : [ 1 ]
+					"fontname" : [ "Arial" ]
 				}
 ,
 				"parentstyle" : "",
@@ -9822,8 +9822,8 @@
 , 			{
 				"name" : "K2",
 				"default" : 				{
-					"fontsize" : [ 10.0 ],
-					"clearcolor" : [ 0.811765, 0.372549, 0.372549, 1.0 ]
+					"clearcolor" : [ 0.811765, 0.372549, 0.372549, 1.0 ],
+					"fontsize" : [ 10.0 ]
 				}
 ,
 				"parentstyle" : "karchkha1",
@@ -9869,9 +9869,9 @@
 , 			{
 				"name" : "karchkha1",
 				"default" : 				{
-					"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ],
+					"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ],
 					"fontsize" : [ 20.0 ],
-					"clearcolor" : [ 0.278431, 0.921569, 0.639216, 0.0 ]
+					"textcolor" : [ 0.0, 0.0, 0.0, 1.0 ]
 				}
 ,
 				"parentstyle" : "",
