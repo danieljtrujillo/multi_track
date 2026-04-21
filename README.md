@@ -1,7 +1,15 @@
 # multi_track
 
-A Max/MSP external for multi-track audio source separation using neural networks.
-Separates audio into four instrument stems — **bass, drums, guitar, piano** — by communicating with a Python server over OSC (Open Sound Control).
+`multi_track` is the legacy MAX/MSP client for AI Accompaniment.
+
+It separates audio into four instrument stems — **bass, drums, guitar, piano** — by communicating with the Python server over OSC. This is the original front-end from the paper-era system.
+
+The project is no longer MAX-only. The repository now also ships:
+
+- a browser app / web app in [../clients/web_ui](../clients/web_ui)
+- a JUCE standalone app and VST3 plugin in [../clients/juce_plugin](../clients/juce_plugin)
+
+MAX remains here for compatibility with the original patches and performance workflow, but the active migration direction is toward the browser app and the JUCE client.
 
 **Author:** Tornike Karchkhadze (tkarchkhadze@ucsd.edu)
 
