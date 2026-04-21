@@ -1,6 +1,6 @@
 # multi_track
 
-`multi_track` is the legacy MAX/MSP client for AI Accompaniment.
+`multi_track` is the legacy MAX/MSP client for Ghost Note.
 
 It separates audio into four instrument stems — **bass, drums, guitar, piano** — by communicating with the Python server over OSC. This is the original front-end from the paper-era system.
 
